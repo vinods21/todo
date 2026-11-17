@@ -1,0 +1,61 @@
+# SCRUM-2-NFR-06: build, test (incl. Testcontainers PostgreSQL 16), coverage gate and executable jar artifact.
+name: SCRUM-2 CI
+
+on:
+  push:
+    branches:
+      - "feature/**"
+      - main
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0 # full history for git-commit-id-maven-plugin (traceability metadata)
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "21"
+          cache: maven
+
+      - name: Build, test, coverage gate
+        run: ./mvnw -B -ntp verify
+
+      - name: Coverage summary
+        if: always()
+        run: |
+          if [ -f target/site/jacoco/jacoco.csv ]; then
+            awk -F, 'NR>1 {m+=$8; c+=$9} END {if (m+c>0) printf "### SCRUM-2 line coverage: %.1f%%\n", (c*100)/(m+c)}' \
+              target/site/jacoco/jacoco.csv >> "$GITHUB_STEP_SUMMARY"
+          fi
+          if ls target/surefire-reports/TEST-*.xml >/dev/null 2>&1; then
+            echo "### SCRUM-2 acceptance criteria exercised by tests" >> "$GITHUB_STEP_SUMMARY"
+            { grep -ho 'SCRUM-2-AC-[0-9]*' target/surefire-reports/TEST-*.xml || true; } | sort -u | tr '\n' ' ' >> "$GITHUB_STEP_SUMMARY"
+            echo >> "$GITHUB_STEP_SUMMARY"
+          fi
+
+      - name: Upload jar
+        uses: actions/upload-artifact@v4
+        with:
+          name: todo-backend-SCRUM-2-${{ github.sha }}
+          path: |
+            target/todo-backend-*.jar
+            !target/*.jar.original
+          if-no-files-found: error
+
+      - name: Upload test & coverage reports
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: todo-backend-SCRUM-2-${{ github.sha }}-reports
+          path: |
+            target/surefire-reports/
+            target/site/jacoco/
+          if-no-files-found: warn

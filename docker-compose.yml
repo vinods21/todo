@@ -1,0 +1,22 @@
+# SCRUM-2-NFR-03: reproducible local PostgreSQL 16 for development.
+# Credentials are local-dev defaults only (match application.yml defaults); not real secrets.
+services:
+  postgres:
+    image: postgres:16-alpine
+    container_name: todo-postgres
+    environment:
+      POSTGRES_DB: todo
+      POSTGRES_USER: todo
+      POSTGRES_PASSWORD: todo
+    ports:
+      - "5432:5432"
+    volumes:
+      - todo-pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U todo -d todo"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+volumes:
+  todo-pgdata:
