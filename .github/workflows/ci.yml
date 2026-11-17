@@ -1,5 +1,7 @@
-# SCRUM-2-NFR-06: build, test (incl. Testcontainers PostgreSQL 16), coverage gate and executable jar artifact.
-name: SCRUM-2 CI
+# ADR 0008: one workflow for every story. The build identity (Jira key) is derived from the branch once, in job
+# `identity`, and injected into the backend (`build`, SCRUM-2-NFR-06) and `frontend` (SCRUM-1-NFR-06) jobs.
+# feature/SCRUM-<n>-<slug> -> SCRUM-<n>; main -> main; anything else -> NONE (local builds: UNKNOWN).
+name: CI
 
 on:
   push:
@@ -12,8 +14,33 @@ permissions:
   contents: read
 
 jobs:
-  build:
+  identity:
     runs-on: ubuntu-latest
+    outputs:
+      jira_key: ${{ steps.derive.outputs.jira_key }}
+    steps:
+      - name: Derive Jira key from branch
+        id: derive
+        env:
+          # Untrusted input (fork PR branch names): passed via env, never interpolated into the script.
+          BRANCH: ${{ github.head_ref || github.ref_name }}
+        run: |
+          re='^feature/(SCRUM-[0-9]+)(-|$)'
+          if [[ "$BRANCH" =~ $re ]]; then
+            key="${BASH_REMATCH[1]}"
+          elif [[ "$BRANCH" == "main" ]]; then
+            key="main"
+          else
+            key="NONE"
+          fi
+          echo "jira_key=$key" >> "$GITHUB_OUTPUT"
+          echo "### Build identity: \`$key\` (commit \`${GITHUB_SHA::7}\`)" >> "$GITHUB_STEP_SUMMARY"
+
+  build:
+    needs: identity
+    runs-on: ubuntu-latest
+    env:
+      JIRA_KEY: ${{ needs.identity.outputs.jira_key }}
     steps:
       - uses: actions/checkout@v4
         with:
@@ -26,25 +53,33 @@ jobs:
           cache: maven
 
       - name: Build, test, coverage gate
-        run: ./mvnw -B -ntp verify
+        run: ./mvnw -B -ntp verify "-Djira.issue=${JIRA_KEY}"
+
+      - name: Verify build identity
+        run: |
+          jar=$(ls target/todo-backend-*.jar) # the .jar.original from repackaging does not match this glob
+          # grep without -q: an early grep exit could SIGPIPE unzip and fail the step under pipefail.
+          unzip -p "$jar" META-INF/MANIFEST.MF | tr -d '\r' | grep -x "X-Jira-Issue: ${JIRA_KEY}" >/dev/null
+          unzip -p "$jar" BOOT-INF/classes/META-INF/build-info.properties | tr -d '\r' | grep -x "build.jira=${JIRA_KEY}" >/dev/null
+          echo "Backend jar $jar carries X-Jira-Issue and build.jira = ${JIRA_KEY}"
 
       - name: Coverage summary
         if: always()
         run: |
           if [ -f target/site/jacoco/jacoco.csv ]; then
-            awk -F, 'NR>1 {m+=$8; c+=$9} END {if (m+c>0) printf "### SCRUM-2 line coverage: %.1f%%\n", (c*100)/(m+c)}' \
+            awk -F, -v key="$JIRA_KEY" 'NR>1 {m+=$8; c+=$9} END {if (m+c>0) printf "### Backend line coverage (%s): %.1f%%\n", key, (c*100)/(m+c)}' \
               target/site/jacoco/jacoco.csv >> "$GITHUB_STEP_SUMMARY"
           fi
           if ls target/surefire-reports/TEST-*.xml >/dev/null 2>&1; then
-            echo "### SCRUM-2 acceptance criteria exercised by tests" >> "$GITHUB_STEP_SUMMARY"
-            { grep -ho 'SCRUM-2-AC-[0-9]*' target/surefire-reports/TEST-*.xml || true; } | sort -u | tr '\n' ' ' >> "$GITHUB_STEP_SUMMARY"
+            echo "### Backend acceptance criteria exercised by tests (${JIRA_KEY} build)" >> "$GITHUB_STEP_SUMMARY"
+            { grep -hoE 'SCRUM-[0-9]+-AC-[0-9]+' target/surefire-reports/TEST-*.xml || true; } | sort -uV | tr '\n' ' ' >> "$GITHUB_STEP_SUMMARY"
             echo >> "$GITHUB_STEP_SUMMARY"
           fi
 
       - name: Upload jar
         uses: actions/upload-artifact@v4
         with:
-          name: todo-backend-SCRUM-2-${{ github.sha }}
+          name: todo-backend-${{ env.JIRA_KEY }}-${{ github.sha }}
           path: |
             target/todo-backend-*.jar
             !target/*.jar.original
@@ -54,7 +89,7 @@ jobs:
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: todo-backend-SCRUM-2-${{ github.sha }}-reports
+          name: todo-backend-${{ env.JIRA_KEY }}-${{ github.sha }}-reports
           path: |
             target/surefire-reports/
             target/site/jacoco/
@@ -62,7 +97,10 @@ jobs:
 
   # SCRUM-1-NFR-06: frontend lint, typecheck, tests (+coverage gate, junit) and production build artifact.
   frontend:
+    needs: identity
     runs-on: ubuntu-latest
+    env:
+      JIRA_KEY: ${{ needs.identity.outputs.jira_key }} # read by vite.config.ts (tests and build)
     defaults:
       run:
         working-directory: frontend
@@ -91,24 +129,28 @@ jobs:
         run: npm run test:coverage
 
       - name: Build
-        run: npm run build # GITHUB_SHA / GITHUB_REF_NAME / GITHUB_HEAD_REF feed build-info (SCRUM-1-NFR-09)
+        run: npm run build # JIRA_KEY / GITHUB_SHA / GITHUB_REF_NAME / GITHUB_HEAD_REF feed build-info (SCRUM-1-NFR-09)
+
+      - name: Verify build identity
+        run: |
+          node -e 'const b = require("./dist/build-info.json"); if (b.jira !== process.env.JIRA_KEY) { console.error("build-info.json jira mismatch", b); process.exit(1) } console.log(`dist/build-info.json jira = ${b.jira}`)'
 
       - name: Test & coverage summary
         if: always()
         run: |
           if [ -f reports/coverage/coverage-summary.json ]; then
-            node -e 'const s=require("./reports/coverage/coverage-summary.json").total.lines.pct; console.log(`### SCRUM-1 frontend line coverage: ${s}%`)' >> "$GITHUB_STEP_SUMMARY"
+            node -e 'const s=require("./reports/coverage/coverage-summary.json").total.lines.pct; console.log(`### Frontend line coverage (${process.env.JIRA_KEY}): ${s}%`)' >> "$GITHUB_STEP_SUMMARY"
           fi
           if [ -f reports/junit.xml ]; then
-            echo "### SCRUM-1 acceptance criteria exercised by tests" >> "$GITHUB_STEP_SUMMARY"
-            { grep -o 'SCRUM-1-AC-[0-9]*' reports/junit.xml || true; } | sort -u | tr '\n' ' ' >> "$GITHUB_STEP_SUMMARY"
+            echo "### Frontend acceptance criteria exercised by tests (${JIRA_KEY} build)" >> "$GITHUB_STEP_SUMMARY"
+            { grep -oE 'SCRUM-[0-9]+-AC-[0-9]+' reports/junit.xml || true; } | sort -uV | tr '\n' ' ' >> "$GITHUB_STEP_SUMMARY"
             echo >> "$GITHUB_STEP_SUMMARY"
           fi
 
       - name: Upload dist
         uses: actions/upload-artifact@v4
         with:
-          name: todo-frontend-SCRUM-1-${{ github.sha }}
+          name: todo-frontend-${{ env.JIRA_KEY }}-${{ github.sha }}
           path: frontend/dist/ # upload-artifact ignores working-directory: repo-relative path
           if-no-files-found: error
 
@@ -116,7 +158,7 @@ jobs:
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: todo-frontend-SCRUM-1-${{ github.sha }}-reports
+          name: todo-frontend-${{ env.JIRA_KEY }}-${{ github.sha }}-reports
           path: |
             frontend/reports/junit.xml
             frontend/reports/coverage/

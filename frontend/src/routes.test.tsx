@@ -48,7 +48,7 @@ describe('SCRUM-1 routing', () => {
     renderApp('/nope')
     expect(screen.getByRole('link', { name: 'Todo' })).toHaveAttribute('href', '/')
     expect(screen.getByRole('link', { name: 'New task' })).toHaveAttribute('href', '/tasks/new')
-    expect(screen.getByRole('contentinfo')).toHaveTextContent('SCRUM-1 ·')
+    expect(screen.getByRole('contentinfo')).toHaveTextContent(`${__JIRA_KEY__} ·`)
   })
 })
 

@@ -91,12 +91,19 @@ class TodoApplicationIntegrationTest {
     }
 
     @Test
-    @DisplayName("SCRUM-2-NFR-06: /actuator/info exposes build info carrying jira=SCRUM-2 (traceability)")
+    @Tag("SCRUM-6")
+    @DisplayName("SCRUM-2-NFR-06, SCRUM-6-NFR-07: /actuator/info build.jira equals the Jira key the build was made for (ADR 0008)")
     void infoCarriesJiraKey() {
         ResponseEntity<String> response = call(HttpMethod.GET, "/actuator/info", null);
 
         assertThat(response.getStatusCode().value()).isEqualTo(200);
-        assertThat(JsonPath.<String>read(response.getBody(), "$.build.jira")).isEqualTo("SCRUM-2");
+        String jira = JsonPath.read(response.getBody(), "$.build.jira");
+        assertThat(jira).matches("SCRUM-\\d+|main|NONE|UNKNOWN");
+        // Set by Maven Surefire from ${jira.issue} (CI: -Djira.issue=<key derived from the branch>; local: UNKNOWN).
+        String expected = System.getProperty("build.jira.expected");
+        if (expected != null) {
+            assertThat(jira).isEqualTo(expected);
+        }
     }
 
     @Test
