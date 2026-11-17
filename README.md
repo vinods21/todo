@@ -161,7 +161,8 @@ Every artefact traces back to its Jira story and acceptance criteria (ADR
   (`-Djira.issue=…`) and Vite (`JIRA_KEY`). Local builds say `UNKNOWN` unless you pass it yourself:
   `./mvnw verify -Djira.issue=SCRUM-6`, `JIRA_KEY=SCRUM-6 npm run build`.
 - **Jar:** the manifest carries `X-Jira-Issue`, `X-Git-Commit`, `X-Git-Branch` and `Implementation-Version`
-  (`unzip -p target/todo-backend-0.1.0-SNAPSHOT.jar META-INF/MANIFEST.MF`).
+  (`unzip -p target/todo-backend-0.1.0-SNAPSHOT.jar META-INF/MANIFEST.MF`); `build.jira` is in
+  `META-INF/build-info.properties` at the jar root (Spring Boot 4 — not under `BOOT-INF/classes/`).
 - **Runtime:** `GET /actuator/info` returns the git commit/branch and `build.jira` (the build's Jira key).
 - **CI:** GitHub Actions workflow `CI` (`.github/workflows/ci.yml`): job `identity` derives the key (shown in the
   run summary), job `build` publishes the jar as artifact `todo-backend-<key>-<commit sha>` and test + coverage

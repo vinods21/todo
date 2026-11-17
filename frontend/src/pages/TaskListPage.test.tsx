@@ -236,6 +236,53 @@ describe('SCRUM-6 task list status', () => {
     ])
   })
 
+  it('SCRUM-6-AC-10: a change that settles after another row reloaded the filtered list still leaves the view', async () => {
+    seedTasks([
+      { title: 'Alpha', status: 'TODO' },
+      { title: 'Beta', status: 'TODO' },
+    ])
+    const gate = deferred()
+    server.use(
+      http.patch(`${API}/tasks/2/status`, async () => {
+        await gate.promise
+        const beta = storedTask(2)!
+        beta.status = 'DONE'
+        return HttpResponse.json(beta)
+      }),
+    )
+    const { user } = renderApp('/?status=TODO')
+    await user.selectOptions(await screen.findByRole('combobox', { name: 'Status for Beta' }), 'Done')
+    await user.selectOptions(statusSelect('Alpha'), 'Done')
+    // Alpha's success reloads the list while Beta's PATCH is still in flight; Beta is still TODO on the server.
+    await waitFor(() => expect(screen.queryByRole('combobox', { name: 'Status for Alpha' })).not.toBeInTheDocument())
+    expect(await screen.findByRole('combobox', { name: 'Status for Beta' })).toHaveDisplayValue('To do')
+    gate.resolve()
+    expect(await screen.findByText('No tasks with status To do.')).toBeInTheDocument()
+    expect(screen.getByRole('status')).toHaveTextContent('Status of "Beta" changed to Done.')
+  })
+
+  it('SCRUM-6-AC-11: a failure that settles after another row reloaded the list is still announced', async () => {
+    seedTasks([{ title: 'Ghost' }, { title: 'Beta' }])
+    const gate = deferred()
+    server.use(
+      http.patch(`${API}/tasks/1/status`, () => HttpResponse.json(errorBody(404, 'gone'), { status: 404 })),
+      http.patch(`${API}/tasks/2/status`, async () => {
+        await gate.promise
+        return HttpResponse.json(errorBody(500, 'boom'), { status: 500 })
+      }),
+    )
+    const { user } = renderApp('/')
+    await user.selectOptions(await screen.findByRole('combobox', { name: 'Status for Beta' }), 'Done')
+    await user.selectOptions(statusSelect('Ghost'), 'Done')
+    expect(await screen.findByRole('alert')).toHaveTextContent('Task not found: "Ghost"')
+    await waitFor(() => expect(statusSelect('Beta')).toBeEnabled())
+    gate.resolve()
+    await waitFor(() =>
+      expect(screen.getByRole('alert')).toHaveTextContent('Could not change the status of "Beta". Something went wrong.'),
+    )
+    expect(statusSelect('Beta')).toHaveDisplayValue('To do')
+  })
+
   it('SCRUM-6-AC-10: when the change empties the last filtered page the list moves to the new last page', async () => {
     seedManyTasks(21) // all TODO; page 2 holds only "Task 1"
     const { user, router } = renderApp('/?status=TODO&page=2')

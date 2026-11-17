@@ -8,8 +8,8 @@ interface TaskTableProps {
   /** URL to return to after edit/cancel (keeps the current list page and filter). */
   returnTo: string
   onStatusStarted?: (task: Task) => void
-  onStatusChanged: (updated: Task) => void
-  onStatusFailed: (task: Task, error: ApiError) => void
+  onStatusChanged: (updated: Task, detached: boolean) => void
+  onStatusFailed: (task: Task, error: ApiError, detached: boolean) => void
 }
 
 /** SCRUM-1-AC-01: title, status and due date in API order. SCRUM-6-AC-08: the status is a per-row control. */

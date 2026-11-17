@@ -9,10 +9,13 @@ export interface StatusSelectProps {
   task: Task
   /** A change was sent (the page clears stale messages). */
   onStarted?: (task: Task) => void
-  /** After a 200, with the server's task. */
-  onChanged: (updated: Task) => void
-  /** After any failure; the control has already reverted. */
-  onFailed: (task: Task, error: ApiError) => void
+  /**
+   * After a 200, with the server's task. `detached` is true when this row was unmounted while the request was in
+   * flight (e.g. another row's change reloaded the list): the page's current data may not include this change.
+   */
+  onChanged: (updated: Task, detached: boolean) => void
+  /** After any failure; the control has already reverted (unless `detached`, see `onChanged`). */
+  onFailed: (task: Task, error: ApiError, detached: boolean) => void
 }
 
 /**
@@ -44,16 +47,21 @@ export function StatusSelect({ task, onStarted, onChanged, onFailed }: StatusSel
     onStarted?.(task)
     try {
       const updated = await updateTaskStatus(task.id, next)
-      if (!isMounted()) return
-      setValue(updated.status)
-      setPending(false)
-      onChanged(updated)
+      // Still reported when this row is gone, so the page can reload data that may predate this change.
+      const detached = !isMounted()
+      if (!detached) {
+        setValue(updated.status)
+        setPending(false)
+      }
+      onChanged(updated, detached)
     } catch (error) {
-      if (!isMounted()) return
-      // SCRUM-6-AC-11: revert to the last confirmed value.
-      setValue(previous)
-      setPending(false)
-      onFailed(task, isApiError(error) ? error : new ApiError('server', 0, GENERIC_ERROR_MESSAGE))
+      const detached = !isMounted()
+      if (!detached) {
+        // SCRUM-6-AC-11: revert to the last confirmed value.
+        setValue(previous)
+        setPending(false)
+      }
+      onFailed(task, isApiError(error) ? error : new ApiError('server', 0, GENERIC_ERROR_MESSAGE), detached)
     }
   }
 

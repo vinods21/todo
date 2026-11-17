@@ -10,12 +10,12 @@ import { StatusSelect } from './StatusSelect'
 
 function setup(task: Task) {
   const onStarted = vi.fn<(task: Task) => void>()
-  const onChanged = vi.fn<(updated: Task) => void>()
-  const onFailed = vi.fn<(task: Task, error: ApiError) => void>()
+  const onChanged = vi.fn<(updated: Task, detached: boolean) => void>()
+  const onFailed = vi.fn<(task: Task, error: ApiError, detached: boolean) => void>()
   const user = userEvent.setup()
-  render(<StatusSelect task={task} onStarted={onStarted} onChanged={onChanged} onFailed={onFailed} />)
+  const { unmount } = render(<StatusSelect task={task} onStarted={onStarted} onChanged={onChanged} onFailed={onFailed} />)
   const select = screen.getByRole('combobox', { name: `Status for ${task.title}` })
-  return { user, select, onStarted, onChanged, onFailed }
+  return { user, select, unmount, onStarted, onChanged, onFailed }
 }
 
 describe('SCRUM-6 status select', () => {
@@ -34,7 +34,7 @@ describe('SCRUM-6 status select', () => {
     const { user, select, onStarted, onChanged, onFailed } = setup(task as Task)
     await user.selectOptions(select, 'Done')
     await waitFor(() => expect(onChanged).toHaveBeenCalledTimes(1))
-    expect(onChanged).toHaveBeenCalledWith(expect.objectContaining({ id: 1, status: 'DONE', description: 'keep' }))
+    expect(onChanged).toHaveBeenCalledWith(expect.objectContaining({ id: 1, status: 'DONE', description: 'keep' }), false)
     expect(onStarted).toHaveBeenCalledTimes(1)
     expect(onFailed).not.toHaveBeenCalled()
     expect(requestLog).toEqual(['PATCH /api/tasks/1/status'])
@@ -71,6 +71,23 @@ describe('SCRUM-6 status select', () => {
     expect(select).not.toHaveAccessibleDescription('Saving…')
     expect(screen.queryByText('Saving…')).not.toBeInTheDocument()
     expect(select).toHaveFocus()
+  })
+
+  it('SCRUM-6-AC-10, SCRUM-6-AC-11: a request that settles after the row was unmounted is still reported as detached', async () => {
+    const [task] = seedTasks([{ title: 'Gone', status: 'TODO' }])
+    const gate = deferred()
+    server.use(
+      http.patch(`${API}/tasks/1/status`, async () => {
+        await gate.promise
+        return HttpResponse.json({ ...task, status: 'DONE' })
+      }),
+    )
+    const { user, select, unmount, onChanged } = setup(task as Task)
+    await user.selectOptions(select, 'Done')
+    unmount()
+    gate.resolve()
+    await waitFor(() => expect(onChanged).toHaveBeenCalledTimes(1))
+    expect(onChanged).toHaveBeenCalledWith(expect.objectContaining({ id: 1, status: 'DONE' }), true)
   })
 
   it('SCRUM-6-AC-11: a 500 reverts to the previous status and reports a server error', async () => {

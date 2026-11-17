@@ -66,11 +66,14 @@ export function TaskListPage() {
     setRowError(null)
   }
 
-  function handleStatusChanged(task: Task) {
+  // Handlers may run from an earlier render (the row was detached by a reload or view change while its PATCH was in
+  // flight); `reload` and the refs are stable, and messages tagged with an old view are simply not shown.
+  function handleStatusChanged(task: Task, detached: boolean) {
     setRowError(null)
     setAnnouncement({ view, text: `Status of "${task.title}" changed to ${STATUS_LABELS[task.status]}.` })
-    if (status !== undefined) {
-      // SCRUM-6-AC-10: the task no longer matches the filter — reload so it leaves the current view.
+    if (status !== undefined || detached) {
+      // SCRUM-6-AC-10: the task no longer matches the filter — reload so it leaves the current view. A detached row's
+      // change may have landed after the list was (re)loaded, so the current list is refreshed in that case too.
       clampAfterChange.current = true
       reload()
     }

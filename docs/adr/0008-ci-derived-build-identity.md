@@ -45,8 +45,10 @@ builds that contain several stories.
    `todo-backend-${JIRA_KEY}-${{ github.sha }}-reports`, `todo-frontend-${JIRA_KEY}-${{ github.sha }}`,
    `todo-frontend-${JIRA_KEY}-${{ github.sha }}-reports`. Job ids `build` and `frontend` are unchanged.
 5. **Verification in CI:** after building, each job asserts the identity actually landed in the artefact:
-   backend — jar manifest line `X-Jira-Issue: ${JIRA_KEY}` and `BOOT-INF/classes/META-INF/build-info.properties`
-   line `build.jira=${JIRA_KEY}`; frontend — `dist/build-info.json` `jira === JIRA_KEY`.
+   backend — jar manifest line `X-Jira-Issue: ${JIRA_KEY}` and `META-INF/build-info.properties` line
+   `build.jira=${JIRA_KEY}` (in the Spring Boot 4 jar this file sits at the jar root `META-INF/`, not under
+   `BOOT-INF/classes/`; the CI step locates it with `unzip -Z1` rather than hard-coding the path); frontend —
+   `dist/build-info.json` `jira === JIRA_KEY`.
 6. **Tests** no longer assert a specific story key: they assert the value matches
    `SCRUM-\d+|main|NONE|UNKNOWN` and (backend) equals the configured `build.jira.expected`.
 7. Coverage/AC summaries in the run summary list all `SCRUM-<n>-AC-<m>` IDs found, headed with `JIRA_KEY`.

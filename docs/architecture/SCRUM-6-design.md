@@ -534,7 +534,9 @@ jobs:
         run: |
           jar=$(ls target/todo-backend-*.jar)
           unzip -p "$jar" META-INF/MANIFEST.MF | tr -d '\r' | grep -qx "X-Jira-Issue: ${JIRA_KEY}"
-          unzip -p "$jar" BOOT-INF/classes/META-INF/build-info.properties | grep -qx "build.jira=${JIRA_KEY}"
+          # As implemented: build-info.properties is at the jar root META-INF/ in Boot 4 (not BOOT-INF/classes/),
+          # so the step locates it via `unzip -Z1 "$jar" | grep -E '(^|/)META-INF/build-info\.properties$'`.
+          unzip -p "$jar" META-INF/build-info.properties | grep -qx "build.jira=${JIRA_KEY}"
       - name: Coverage summary          # if: always(); heading "### Backend line coverage (${JIRA_KEY})";
                                         # AC list: grep -hoE 'SCRUM-[0-9]+-AC-[0-9]+' … | sort -uV
       - name: Upload jar                # name: todo-backend-${{ env.JIRA_KEY }}-${{ github.sha }}
