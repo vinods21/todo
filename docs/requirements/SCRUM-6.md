@@ -224,31 +224,34 @@ Decisions below are defaults taken by PM so work is not blocked; flag to PM if a
 
 ## 7. Traceability matrix
 
+Filled by Dev; the full mapping (code, test methods, CI evidence) is in
+[`docs/traceability/SCRUM-6.md`](../traceability/SCRUM-6.md).
+
 | ID | Description | Test(s) |
 |---|---|---|
-| SCRUM-6-AC-01 | `PATCH /api/tasks/{id}/status` → 200 full task; only status changes | TBD |
-| SCRUM-6-AC-02 | Any transition allowed (incl. backwards); same→same is no-op 200 | TBD |
-| SCRUM-6-AC-03 | PATCH errors: 400 missing/null/unknown/malformed, 404, 415; task unchanged | TBD |
-| SCRUM-6-AC-04 | CORS preflight allows `PATCH` for allowed origins | TBD |
-| SCRUM-6-AC-05 | `GET /api/tasks?status=` filters with paging/ordering on filtered set | TBD |
-| SCRUM-6-AC-06 | No `status` = SCRUM-2 behaviour; no matches → empty page | TBD |
-| SCRUM-6-AC-07 | Invalid/empty `status` filter → 400 standard body | TBD |
-| SCRUM-6-AC-08 | Per-row status control with accessible name, current value preselected | TBD |
-| SCRUM-6-AC-09 | Changing row status sends PATCH only; row shows new status | TBD |
-| SCRUM-6-AC-10 | Row disabled while in flight; filtered list reloads after change | TBD |
-| SCRUM-6-AC-11 | Error reverts row and announces; 404 shows not found and reloads | TBD |
-| SCRUM-6-AC-12 | Filter control (All/To do/In progress/Done) drives `status` param | TBD |
-| SCRUM-6-AC-13 | Filter in URL `?status=`, combined with `page`; invalid → All | TBD |
-| SCRUM-6-AC-14 | Filter-aware empty state with clear-filter action | TBD |
-| SCRUM-6-AC-15 | Edit/cancel returns to same filter and page | TBD |
-| SCRUM-6-AC-16 | Create/edit forms still set status; quick change visible in edit form | TBD |
-| SCRUM-6-AC-17 | Testcontainers: PATCHed status persists and is reflected by filter | TBD |
-| SCRUM-6-NFR-01 | Backward compatible with SCRUM-1/SCRUM-2; existing tests pass | TBD |
-| SCRUM-6-NFR-02 | No schema change; any index via new Flyway migration only | TBD |
-| SCRUM-6-NFR-03 | Backend tests tagged SCRUM-6, AC-prefixed; JaCoCo gate passes | TBD |
-| SCRUM-6-NFR-04 | Frontend Vitest/RTL/MSW tests, AC-prefixed; typed client; coverage gate | TBD |
-| SCRUM-6-NFR-05 | CI `build` and `frontend` jobs green | TBD |
-| SCRUM-6-NFR-06 | Accessible status control and filter; announcements | TBD |
-| SCRUM-6-NFR-07 | ADR 0004 conventions; design doc, matrix, PR | TBD |
-| SCRUM-6-NFR-08 | Filtering done in the database, not in memory | TBD |
-| SCRUM-6-NFR-09 | README documents PATCH endpoint, `status` param, UI filter | TBD |
+| SCRUM-6-AC-01 | `PATCH /api/tasks/{id}/status` → 200 full task; only status changes | `TaskControllerTest`, `TaskServiceTest`, `TaskStatusIntegrationTest` |
+| SCRUM-6-AC-02 | Any transition allowed (incl. backwards); same→same is no-op 200 | `TaskServiceTest#everyTransitionAllowed`, `TaskStatusIntegrationTest` |
+| SCRUM-6-AC-03 | PATCH errors: 400 missing/null/unknown/malformed, 404, 415; task unchanged | `TaskControllerTest` (`patch*Returns400/404/415`), `TaskStatusIntegrationTest#invalidPatchLeavesRowUnchanged` |
+| SCRUM-6-AC-04 | CORS preflight allows `PATCH` for allowed origins | `CorsConfigTest#patchPreflight*` |
+| SCRUM-6-AC-05 | `GET /api/tasks?status=` filters with paging/ordering on filtered set | `TaskControllerTest#listFilter*`, `TaskServiceTest#listByStatusFiltersInDatabase`, `TaskStatusIntegrationTest#filterPagesOverFilteredSet` |
+| SCRUM-6-AC-06 | No `status` = SCRUM-2 behaviour; no matches → empty page | `TaskControllerTest#listWithoutStatusIsUnfiltered`, `#listFilterWithoutMatchesReturnsEmptyPage` |
+| SCRUM-6-AC-07 | Invalid/empty `status` filter → 400 standard body | `TaskControllerTest#listInvalidStatusReturns400`, `TaskStatusIntegrationTest#invalidFilterReturns400` |
+| SCRUM-6-AC-08 | Per-row status control with accessible name, current value preselected | `StatusSelect.test.tsx`, `TaskListPage.test.tsx` |
+| SCRUM-6-AC-09 | Changing row status sends PATCH only; row shows new status | `StatusSelect.test.tsx`, `TaskListPage.test.tsx`, `tasks.test.ts` |
+| SCRUM-6-AC-10 | Row disabled while in flight; filtered list reloads after change | `StatusSelect.test.tsx`, `TaskListPage.test.tsx` |
+| SCRUM-6-AC-11 | Error reverts row and announces; 404 shows not found and reloads | `StatusSelect.test.tsx`, `TaskListPage.test.tsx` |
+| SCRUM-6-AC-12 | Filter control (All/To do/In progress/Done) drives `status` param | `TaskListPage.test.tsx`, `tasks.test.ts` |
+| SCRUM-6-AC-13 | Filter in URL `?status=`, combined with `page`; invalid → All | `params.test.ts`, `TaskListPage.test.tsx`, `routes.test.tsx` |
+| SCRUM-6-AC-14 | Filter-aware empty state with clear-filter action | `TaskListPage.test.tsx` |
+| SCRUM-6-AC-15 | Edit/cancel returns to same filter and page | `TaskEditPage.test.tsx`, `params.test.ts` |
+| SCRUM-6-AC-16 | Create/edit forms still set status; quick change visible in edit form | `TaskEditPage.test.tsx` + existing SCRUM-1 tests |
+| SCRUM-6-AC-17 | Testcontainers: PATCHed status persists and is reflected by filter | `TaskStatusIntegrationTest#patchedStatusPersistsAndIsFiltered` |
+| SCRUM-6-NFR-01 | Backward compatible with SCRUM-1/SCRUM-2; existing tests pass | all SCRUM-1/SCRUM-2 tests; deliberate changes listed in the matrix |
+| SCRUM-6-NFR-02 | No schema change; any index via new Flyway migration only | `TaskStatusIntegrationTest#flywayV2CreatedStatusIndex`, `TaskPersistenceRestartTest` |
+| SCRUM-6-NFR-03 | Backend tests tagged SCRUM-6, AC-prefixed; JaCoCo gate passes | `./mvnw test -Dgroups=SCRUM-6`; JaCoCo gate in CI |
+| SCRUM-6-NFR-04 | Frontend Vitest/RTL/MSW tests, AC-prefixed; typed client; coverage gate | `npx vitest run -t 'SCRUM-6-'`; coverage gate |
+| SCRUM-6-NFR-05 | CI `build` and `frontend` jobs green | CI workflow `CI` jobs `build`, `frontend` |
+| SCRUM-6-NFR-06 | Accessible status control and filter; announcements | `StatusSelect.test.tsx`, `TaskListPage.test.tsx` (`…, SCRUM-6-NFR-06`) |
+| SCRUM-6-NFR-07 | ADR 0004 conventions; design doc, matrix, PR | `TodoApplicationIntegrationTest#infoCarriesJiraKey`, `BuildInfo.test.tsx`; CI identity job (ADR 0008) |
+| SCRUM-6-NFR-08 | Filtering done in the database, not in memory | `TaskServiceTest#listByStatusFiltersInDatabase` |
+| SCRUM-6-NFR-09 | README documents PATCH endpoint, `status` param, UI filter | README (reviewed in PR) |
