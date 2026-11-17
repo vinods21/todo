@@ -60,7 +60,11 @@ jobs:
           jar=$(ls target/todo-backend-*.jar) # the .jar.original from repackaging does not match this glob
           # grep without -q: an early grep exit could SIGPIPE unzip and fail the step under pipefail.
           unzip -p "$jar" META-INF/MANIFEST.MF | tr -d '\r' | grep -x "X-Jira-Issue: ${JIRA_KEY}" >/dev/null
-          unzip -p "$jar" BOOT-INF/classes/META-INF/build-info.properties | tr -d '\r' | grep -x "build.jira=${JIRA_KEY}" >/dev/null
+          # Locate build-info.properties instead of assuming its path inside the Boot jar.
+          info=$(unzip -Z1 "$jar" | grep -E '(^|/)META-INF/build-info\.properties$' | head -n1 || true)
+          if [ -z "$info" ]; then echo "build-info.properties not found in $jar"; unzip -Z1 "$jar" | grep -i 'build-info' || true; exit 1; fi
+          echo "build-info found at: $info"
+          unzip -p "$jar" "$info" | tr -d '\r' | grep -x "build.jira=${JIRA_KEY}" >/dev/null
           echo "Backend jar $jar carries X-Jira-Issue and build.jira = ${JIRA_KEY}"
 
       - name: Coverage summary
