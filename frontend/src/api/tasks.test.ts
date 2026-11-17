@@ -14,7 +14,7 @@ describe('SCRUM-1 tasks API', () => {
       }),
     )
     expect(PAGE_SIZE).toBe(20)
-    await expect(listTasks(2)).resolves.toEqual(page)
+    await expect(listTasks({ page: 2 })).resolves.toEqual(page)
     expect(url?.searchParams.get('page')).toBe('2')
     expect(url?.searchParams.get('size')).toBe('20')
   })

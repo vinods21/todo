@@ -156,3 +156,30 @@ button:disabled {
   clip: rect(0 0 0 0);
   white-space: nowrap;
 }
+
+/* SCRUM-6: list toolbar (status filter) and per-row "Saving…" hint. */
+.list-toolbar {
+  display: flex;
+  gap: 1rem;
+  align-items: center;
+  margin-bottom: 1rem;
+}
+
+.status-filter {
+  display: flex;
+  gap: 0.5rem;
+  align-items: center;
+}
+
+.list-toolbar select,
+.task-table select {
+  font: inherit;
+  padding: 0.2rem 0.4rem;
+  border: 1px solid #8c959f;
+  border-radius: 6px;
+}
+
+.row-saving {
+  margin-left: 0.5rem;
+  color: #59636e;
+}

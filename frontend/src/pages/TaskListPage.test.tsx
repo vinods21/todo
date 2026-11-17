@@ -20,12 +20,19 @@ describe('SCRUM-1 task list', () => {
     renderApp('/')
     expect(await screen.findByRole('table', { name: 'Tasks' })).toBeInTheDocument()
     expect(requestLog).toEqual(['GET /api/tasks?page=0&size=20'])
-    const cells = rows().map((row) => within(row).getAllByRole('cell').slice(0, 3).map((c) => c.textContent))
+    // SCRUM-6 (design §8.3): the status cell is now a control; its selected option carries the label.
+    const cells = rows().map((row) => {
+      const [title, , due] = within(row).getAllByRole('cell').map((c) => c.textContent)
+      return [title, due]
+    })
     expect(cells).toEqual([
-      ['Newest', 'To do', '2025-01-01'],
-      ['Middle', 'In progress', 'No due date'],
-      ['Oldest', 'Done', '2026-12-24'],
+      ['Newest', '2025-01-01'],
+      ['Middle', 'No due date'],
+      ['Oldest', '2026-12-24'],
     ])
+    expect(screen.getByRole('combobox', { name: 'Status for Newest' })).toHaveDisplayValue('To do')
+    expect(screen.getByRole('combobox', { name: 'Status for Middle' })).toHaveDisplayValue('In progress')
+    expect(screen.getByRole('combobox', { name: 'Status for Oldest' })).toHaveDisplayValue('Done')
     expect(screen.getByRole('link', { name: 'Edit Middle' })).toHaveAttribute('href', '/tasks/2/edit')
   })
 
