@@ -157,6 +157,17 @@
                 </executions>
             </plugin>
 
+            <!-- ADR 0004: write @DisplayName (AC IDs) as testcase names into surefire XML reports -->
+            <plugin>
+                <groupId>org.apache.maven.plugins</groupId>
+                <artifactId>maven-surefire-plugin</artifactId>
+                <configuration>
+                    <statelessTestsetReporter implementation="org.apache.maven.plugin.surefire.extensions.junit5.JUnit5Xml30StatelessReporter">
+                        <usePhrasedTestCaseMethodName>true</usePhrasedTestCaseMethodName>
+                    </statelessTestsetReporter>
+                </configuration>
+            </plugin>
+
             <!-- SCRUM-2-AC-16: coverage report + 80% line gate on service and web packages -->
             <plugin>
                 <groupId>org.jacoco</groupId>
