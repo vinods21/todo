@@ -197,3 +197,62 @@ describe('SCRUM-1 edit task', () => {
     expect(returnTarget('x')).toBe('/')
   })
 })
+
+describe('SCRUM-6 edit task', () => {
+  function seedDone(n: number) {
+    return seedTasks(Array.from({ length: n }, (_, i) => ({ title: `Task ${i + 1}`, status: 'DONE' as const })))
+  }
+
+  it('SCRUM-6-AC-15: Edit then Cancel from a filtered second page returns to the same filter and page', async () => {
+    seedDone(25)
+    const { user, router } = renderApp('/?status=DONE&page=2')
+    await user.click(await screen.findByRole('link', { name: 'Edit Task 5' }))
+    expect(currentPath(router)).toBe('/tasks/5/edit')
+    await user.click(await screen.findByRole('button', { name: 'Cancel' }))
+    expect(await screen.findByText('Page 2 of 2')).toBeInTheDocument()
+    expect(currentPath(router)).toBe('/?status=DONE&page=2')
+    expect(screen.getByRole('combobox', { name: 'Status' })).toHaveDisplayValue('Done')
+  })
+
+  it('SCRUM-6-AC-15: Edit then Save from a filtered second page returns to the same filter and page', async () => {
+    seedDone(25)
+    const { user, router } = renderApp('/?status=DONE&page=2')
+    await user.click(await screen.findByRole('link', { name: 'Edit Task 3' }))
+    await user.type(await screen.findByLabelText('Title'), ' edited')
+    await user.click(screen.getByRole('button', { name: 'Save changes' }))
+    expect(await screen.findByRole('cell', { name: 'Task 3 edited' })).toBeInTheDocument()
+    expect(currentPath(router)).toBe('/?status=DONE&page=2')
+    expect(requestLog).toEqual([
+      'GET /api/tasks?page=1&size=20&status=DONE',
+      'GET /api/tasks/3',
+      'PUT /api/tasks/3',
+      'GET /api/tasks?page=1&size=20&status=DONE',
+    ])
+  })
+
+  it('SCRUM-6-AC-16: a status changed from the list is prefilled in the edit form, and saving sends it with PUT', async () => {
+    seedTasks([{ title: 'Quick', status: 'TODO' }])
+    const { user } = renderApp('/')
+    await user.selectOptions(await screen.findByRole('combobox', { name: 'Status for Quick' }), 'In progress')
+    expect(await screen.findByRole('status')).toHaveTextContent('Status of "Quick" changed to In progress.')
+    await user.click(screen.getByRole('link', { name: 'Edit Quick' }))
+    expect(await screen.findByLabelText('Status')).toHaveValue('IN_PROGRESS')
+    await user.selectOptions(screen.getByLabelText('Status'), 'Done')
+    await user.click(screen.getByRole('button', { name: 'Save changes' }))
+    expect(await screen.findByRole('combobox', { name: 'Status for Quick' })).toHaveDisplayValue('Done')
+    expect(bodyLog).toEqual([
+      { status: 'IN_PROGRESS' },
+      { title: 'Quick', description: null, status: 'DONE', dueDate: null },
+    ])
+    expect(requestLog).toContain('PUT /api/tasks/1')
+  })
+
+  it('SCRUM-6-AC-16: the create form still sends the chosen status', async () => {
+    const { user } = renderApp('/tasks/new')
+    await user.type(screen.getByLabelText('Title'), 'Created done')
+    await user.selectOptions(screen.getByLabelText('Status'), 'Done')
+    await user.click(screen.getByRole('button', { name: 'Create task' }))
+    expect(await screen.findByRole('combobox', { name: 'Status for Created done' })).toHaveDisplayValue('Done')
+    expect(bodyLog).toEqual([{ title: 'Created done', description: null, status: 'DONE', dueDate: null }])
+  })
+})

@@ -1,4 +1,4 @@
-import { act, screen } from '@testing-library/react'
+import { act, screen, waitFor } from '@testing-library/react'
 import { seedManyTasks, seedTasks } from './test/handlers'
 import { currentPath, renderApp } from './test/renderApp'
 
@@ -49,5 +49,32 @@ describe('SCRUM-1 routing', () => {
     expect(screen.getByRole('link', { name: 'Todo' })).toHaveAttribute('href', '/')
     expect(screen.getByRole('link', { name: 'New task' })).toHaveAttribute('href', '/tasks/new')
     expect(screen.getByRole('contentinfo')).toHaveTextContent('SCRUM-1 ·')
+  })
+})
+
+describe('SCRUM-6 routing', () => {
+  it('SCRUM-6-AC-13: Back and Forward restore the previous and next filter', async () => {
+    seedTasks([
+      { title: 'Open', status: 'TODO' },
+      { title: 'Finished', status: 'DONE' },
+    ])
+    const { user, router } = renderApp('/')
+    await screen.findByRole('combobox', { name: 'Status for Open' })
+    await user.selectOptions(screen.getByRole('combobox', { name: 'Status' }), 'Done')
+    expect(currentPath(router)).toBe('/?status=DONE')
+    await screen.findByRole('combobox', { name: 'Status for Finished' })
+
+    await act(() => router.navigate(-1))
+    expect(currentPath(router)).toBe('/')
+    expect(await screen.findByRole('combobox', { name: 'Status for Open' })).toBeInTheDocument()
+    expect(screen.getByRole('combobox', { name: 'Status' })).toHaveDisplayValue('All')
+
+    await act(() => router.navigate(1))
+    expect(currentPath(router)).toBe('/?status=DONE')
+    await waitFor(() =>
+      expect(screen.queryByRole('combobox', { name: 'Status for Open' })).not.toBeInTheDocument(),
+    )
+    expect(screen.getByRole('combobox', { name: 'Status' })).toHaveDisplayValue('Done')
+    expect(await screen.findByRole('combobox', { name: 'Status for Finished' })).toBeInTheDocument()
   })
 })
