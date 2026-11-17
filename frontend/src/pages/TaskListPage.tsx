@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
-import { Link, useSearchParams } from 'react-router'
+import { Link, useLocation, useSearchParams } from 'react-router'
 import { GENERIC_ERROR_MESSAGE, NETWORK_ERROR_MESSAGE, type ApiError } from '../api/errors'
 import { listTasks } from '../api/tasks'
 import type { Task, TaskStatus } from '../api/types'
@@ -18,9 +18,19 @@ interface ViewMessage {
   text: string
 }
 
+/** The view a clamp navigation (SCRUM-6-AC-10) came from, carried in location state. */
+function clampedFrom(state: unknown): string | undefined {
+  if (typeof state === 'object' && state !== null && 'clampedFrom' in state) {
+    const { clampedFrom: from } = state
+    if (typeof from === 'string') return from
+  }
+  return undefined
+}
+
 /** SCRUM-1-AC-01..03, AC-09, AC-10; SCRUM-6-AC-08..AC-15, NFR-06 */
 export function TaskListPage() {
   const [searchParams, setSearchParams] = useSearchParams()
+  const location = useLocation()
   const { page, status } = parseListParams(searchParams)
   const view = listPath({ page, status })
   // SCRUM-6-AC-13: an invalid ?status is "All" and never sent to the API.
@@ -41,9 +51,10 @@ export function TaskListPage() {
     if (settled.status !== 'success') return
     const { items, totalPages } = settled.data
     if (items.length === 0 && page > 1 && totalPages > 0) {
-      setSearchParams(listSearchParams({ page: totalPages, status }), { replace: true })
+      // Location state keeps the change's announcement visible on the clamped page.
+      setSearchParams(listSearchParams({ page: totalPages, status }), { replace: true, state: { clampedFrom: view } })
     }
-  }, [settled, page, status, setSearchParams])
+  }, [settled, page, status, view, setSearchParams])
 
   function changeFilter(next: TaskStatus | undefined) {
     // SCRUM-6-AC-13: a new filter starts at page 1; pushed so Back/Forward restore the previous filter.
@@ -78,8 +89,12 @@ export function TaskListPage() {
     setRowError({ view, text: `Could not change the status of "${task.title}". ${reason}` })
   }
 
-  const announcementText = announcement?.view === view ? announcement.text : null
-  const rowErrorText = rowError?.view === view ? rowError.text : null
+  // Messages belong to the view they were raised in (filter/page changes clear them), or to its clamp target.
+  const from = clampedFrom(location.state)
+  const visible = (message: ViewMessage | null) =>
+    message !== null && (message.view === view || message.view === from) ? message.text : null
+  const announcementText = visible(announcement)
+  const rowErrorText = visible(rowError)
 
   return (
     <section>
