@@ -48,12 +48,21 @@ class TaskPersistenceRestartTest {
         return RestClient.create("http://localhost:" + port);
     }
 
+    private static Integer appliedMigrations(ConfigurableApplicationContext context) {
+        return context.getBean(JdbcTemplate.class)
+                .queryForObject("SELECT count(*) FROM flyway_schema_history WHERE success", Integer.class);
+    }
+
     @Test
-    @DisplayName("SCRUM-2-AC-09, SCRUM-2-AC-01: a task created before a restart is returned after it; V1 is not re-applied")
+    @Tag("SCRUM-6")
+    @DisplayName("SCRUM-2-AC-09, SCRUM-2-AC-01, SCRUM-6-NFR-02: a task created before a restart is returned after it; migrations are not re-applied")
     void taskSurvivesRestart() {
         String path;
         String createdAt;
+        Integer migrationsAfterFirstStart;
         try (ConfigurableApplicationContext first = startApplication()) {
+            migrationsAfterFirstStart = appliedMigrations(first);
+            assertThat(migrationsAfterFirstStart).isGreaterThanOrEqualTo(1);
             ResponseEntity<String> created = clientFor(first).post()
                     .uri("/api/tasks")
                     .contentType(MediaType.APPLICATION_JSON)
@@ -79,9 +88,8 @@ class TaskPersistenceRestartTest {
             assertThat(JsonPath.<String>read(fetched.getBody(), "$.status")).isEqualTo("IN_PROGRESS");
             assertThat(JsonPath.<String>read(fetched.getBody(), "$.createdAt")).isEqualTo(createdAt);
 
-            Integer appliedMigrations = second.getBean(JdbcTemplate.class)
-                    .queryForObject("SELECT count(*) FROM flyway_schema_history WHERE success", Integer.class);
-            assertThat(appliedMigrations).isEqualTo(1);
+            // Same number of successful migrations as after the first start: nothing was applied twice.
+            assertThat(appliedMigrations(second)).isEqualTo(migrationsAfterFirstStart);
         }
     }
 }

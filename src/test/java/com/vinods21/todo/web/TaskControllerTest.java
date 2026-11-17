@@ -11,6 +11,7 @@ import org.junit.jupiter.api.Tag;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.MethodSource;
+import org.junit.jupiter.params.provider.ValueSource;
 import org.mockito.ArgumentCaptor;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.webmvc.test.autoconfigure.WebMvcTest;
@@ -28,6 +29,7 @@ import java.util.List;
 import java.util.stream.Stream;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.hamcrest.Matchers.containsString;
 import static org.hamcrest.Matchers.endsWith;
 import static org.hamcrest.Matchers.hasSize;
@@ -35,11 +37,13 @@ import static org.hamcrest.Matchers.not;
 import static org.hamcrest.Matchers.notNullValue;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyInt;
+import static org.mockito.ArgumentMatchers.anyLong;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.doThrow;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.verifyNoInteractions;
+import static org.mockito.Mockito.verifyNoMoreInteractions;
 import static org.mockito.Mockito.when;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.delete;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
@@ -487,5 +491,248 @@ class TaskControllerTest {
                 .andExpect(content().string(not(containsString("SELECT"))))
                 .andExpect(content().string(not(containsString("Exception"))))
                 .andExpect(content().string(not(containsString("at com."))));
+    }
+
+    // ---------------------------------------------------------------- SCRUM-6: PATCH /api/tasks/{id}/status
+
+    @Test
+    @Tag("SCRUM-6")
+    @DisplayName("SCRUM-6-AC-01: PATCH status returns 200 with the full task; extra body fields such as title are ignored")
+    void patchStatusReturns200AndIgnoresExtraFields() throws Exception {
+        when(taskService.updateStatus(1L, TaskStatus.DONE)).thenReturn(task(1L, "Write docs", TaskStatus.DONE));
+
+        mockMvc.perform(patch("/api/tasks/1/status")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {"status": "DONE", "title": "hacked", "id": 42, "createdAt": "2000-01-01T00:00:00Z"}
+                                """))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.id").value(1))
+                .andExpect(jsonPath("$.title").value("Write docs"))
+                .andExpect(jsonPath("$.description").value("Some description"))
+                .andExpect(jsonPath("$.status").value("DONE"))
+                .andExpect(jsonPath("$.createdAt").value("2026-11-17T10:15:30Z"))
+                .andExpect(jsonPath("$.dueDate").value("2026-12-01"));
+
+        // Only (id, status) reaches the service: the extra fields cannot be applied anywhere.
+        verify(taskService).updateStatus(1L, TaskStatus.DONE);
+        verifyNoMoreInteractions(taskService);
+    }
+
+    @ParameterizedTest(name = "SCRUM-6-AC-03: PATCH body {0} returns 400 Validation failed with a status field error")
+    @ValueSource(strings = {"{}", "{\"status\": null}"})
+    @Tag("SCRUM-6")
+    @DisplayName("SCRUM-6-AC-03: missing or null status returns 400 Validation failed with a status field error")
+    void patchMissingStatusReturns400(String body) throws Exception {
+        mockMvc.perform(patch("/api/tasks/1/status").contentType(MediaType.APPLICATION_JSON).content(body))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.status").value(400))
+                .andExpect(jsonPath("$.message").value("Validation failed"))
+                .andExpect(jsonPath("$.path").value("/api/tasks/1/status"))
+                .andExpect(jsonPath("$.fieldErrors", hasSize(1)))
+                .andExpect(jsonPath("$.fieldErrors[0].field").value("status"));
+
+        verifyNoInteractions(taskService);
+    }
+
+    @ParameterizedTest(name = "SCRUM-6-AC-03: PATCH status value {0} returns 400 with a status field error")
+    @ValueSource(strings = {"done", "DONEE", "Done", "BLOCKED"})
+    @Tag("SCRUM-6")
+    @DisplayName("SCRUM-6-AC-03: a status outside the enum (incl. wrong case) returns 400 with a status field error")
+    void patchUnknownStatusReturns400(String value) throws Exception {
+        mockMvc.perform(patch("/api/tasks/1/status")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"status\": \"" + value + "\"}"))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.status").value(400))
+                .andExpect(jsonPath("$.message").value("Invalid value for field 'status'"))
+                .andExpect(jsonPath("$.fieldErrors", hasSize(1)))
+                .andExpect(jsonPath("$.fieldErrors[0].field").value("status"));
+
+        verifyNoInteractions(taskService);
+    }
+
+    @Test
+    @Tag("SCRUM-6")
+    @DisplayName("SCRUM-6-AC-03: malformed JSON returns 400 Malformed JSON request")
+    void patchMalformedJsonReturns400() throws Exception {
+        mockMvc.perform(patch("/api/tasks/1/status").contentType(MediaType.APPLICATION_JSON).content("{\"status\": "))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.status").value(400))
+                .andExpect(jsonPath("$.message").value("Malformed JSON request"))
+                .andExpect(jsonPath("$.fieldErrors", hasSize(0)));
+
+        verifyNoInteractions(taskService);
+    }
+
+    @ParameterizedTest(name = "SCRUM-6-AC-03: PATCH body [{0}] that is not a JSON object returns 400")
+    @ValueSource(strings = {"\"DONE\"", "", "[\"DONE\"]"})
+    @Tag("SCRUM-6")
+    @DisplayName("SCRUM-6-AC-03: a bare string, an array or an empty body returns 400 and changes nothing")
+    void patchNonObjectBodyReturns400(String body) throws Exception {
+        mockMvc.perform(patch("/api/tasks/1/status").contentType(MediaType.APPLICATION_JSON).content(body))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.status").value(400))
+                .andExpect(jsonPath("$.fieldErrors").isArray());
+
+        verifyNoInteractions(taskService);
+    }
+
+    @Test
+    @Tag("SCRUM-6")
+    @DisplayName("SCRUM-6-AC-03: non-numeric id returns 400 Invalid value for parameter 'id'")
+    void patchNonNumericIdReturns400() throws Exception {
+        mockMvc.perform(patch("/api/tasks/abc/status")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"status\": \"DONE\"}"))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.message").value("Invalid value for parameter 'id'"))
+                .andExpect(jsonPath("$.path").value("/api/tasks/abc/status"));
+
+        verifyNoInteractions(taskService);
+    }
+
+    @Test
+    @Tag("SCRUM-6")
+    @DisplayName("SCRUM-6-AC-03: unknown id returns 404 with the standard error body")
+    void patchUnknownIdReturns404() throws Exception {
+        when(taskService.updateStatus(99L, TaskStatus.DONE)).thenThrow(new TaskNotFoundException(99L));
+
+        mockMvc.perform(patch("/api/tasks/99/status")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"status\": \"DONE\"}"))
+                .andExpect(status().isNotFound())
+                .andExpect(jsonPath("$.timestamp", notNullValue()))
+                .andExpect(jsonPath("$.status").value(404))
+                .andExpect(jsonPath("$.error").value("Not Found"))
+                .andExpect(jsonPath("$.message").value("Task with id 99 not found"))
+                .andExpect(jsonPath("$.path").value("/api/tasks/99/status"))
+                .andExpect(jsonPath("$.fieldErrors", hasSize(0)));
+    }
+
+    @Test
+    @Tag("SCRUM-6")
+    @DisplayName("SCRUM-6-AC-03: non-JSON content type returns 415 with the standard error body")
+    void patchNonJsonReturns415() throws Exception {
+        mockMvc.perform(patch("/api/tasks/1/status").contentType(MediaType.TEXT_PLAIN).content("DONE"))
+                .andExpect(status().isUnsupportedMediaType())
+                .andExpect(jsonPath("$.status").value(415))
+                .andExpect(jsonPath("$.message", containsString("is not supported")))
+                .andExpect(jsonPath("$.path").value("/api/tasks/1/status"));
+
+        verify(taskService, never()).updateStatus(anyLong(), any());
+    }
+
+    // ---------------------------------------------------------------- SCRUM-6: GET /api/tasks?status=
+
+    @Test
+    @Tag("SCRUM-6")
+    @DisplayName("SCRUM-6-AC-05: ?status=DONE lists via listByStatus(0, 20, DONE) with paging metadata of the filtered set")
+    void listFiltersByStatus() throws Exception {
+        Page<Task> page = new PageImpl<>(List.of(task(5L, "Newer done", TaskStatus.DONE), task(3L, "Older done", TaskStatus.DONE)),
+                PageRequest.of(0, 20), 2);
+        when(taskService.listByStatus(0, 20, TaskStatus.DONE)).thenReturn(page);
+
+        mockMvc.perform(get("/api/tasks").param("status", "DONE"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.items", hasSize(2)))
+                .andExpect(jsonPath("$.items[0].id").value(5))
+                .andExpect(jsonPath("$.items[0].status").value("DONE"))
+                .andExpect(jsonPath("$.items[1].id").value(3))
+                .andExpect(jsonPath("$.page").value(0))
+                .andExpect(jsonPath("$.size").value(20))
+                .andExpect(jsonPath("$.totalElements").value(2))
+                .andExpect(jsonPath("$.totalPages").value(1));
+
+        verify(taskService, never()).list(anyInt(), anyInt());
+    }
+
+    @Test
+    @Tag("SCRUM-6")
+    @DisplayName("SCRUM-6-AC-05: ?status combined with page and size keeps the SCRUM-2 paging rules (size clamped to 100)")
+    void listFilterKeepsPagingRules() throws Exception {
+        when(taskService.listByStatus(1, 100, TaskStatus.IN_PROGRESS)).thenReturn(Page.empty(PageRequest.of(1, 100)));
+
+        mockMvc.perform(get("/api/tasks").param("status", "IN_PROGRESS").param("page", "1").param("size", "150"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.page").value(1))
+                .andExpect(jsonPath("$.size").value(100));
+
+        verify(taskService).listByStatus(1, 100, TaskStatus.IN_PROGRESS);
+    }
+
+    @Test
+    @Tag("SCRUM-6")
+    @DisplayName("SCRUM-6-AC-05: ?status=DONE&page=-1 still returns 400 with a field error for page")
+    void listFilterNegativePageReturns400() throws Exception {
+        mockMvc.perform(get("/api/tasks").param("status", "DONE").param("page", "-1"))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.message").value("Validation failed"))
+                .andExpect(jsonPath("$.fieldErrors", hasSize(1)))
+                .andExpect(jsonPath("$.fieldErrors[0].field").value("page"));
+
+        verifyNoInteractions(taskService);
+    }
+
+    @Test
+    @Tag("SCRUM-6")
+    @DisplayName("SCRUM-6-AC-06: without status the unfiltered SCRUM-2 list(page, size) is used")
+    void listWithoutStatusIsUnfiltered() throws Exception {
+        when(taskService.list(0, 20)).thenReturn(new PageImpl<>(List.of(task(1L, "Any", TaskStatus.TODO)),
+                PageRequest.of(0, 20), 1));
+
+        mockMvc.perform(get("/api/tasks"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.items", hasSize(1)));
+
+        verify(taskService).list(0, 20);
+        verify(taskService, never()).listByStatus(anyInt(), anyInt(), any());
+    }
+
+    @Test
+    @Tag("SCRUM-6")
+    @DisplayName("SCRUM-6-AC-06: a filter that matches nothing returns 200 with an empty page")
+    void listFilterWithoutMatchesReturnsEmptyPage() throws Exception {
+        when(taskService.listByStatus(0, 20, TaskStatus.IN_PROGRESS)).thenReturn(Page.empty(PageRequest.of(0, 20)));
+
+        mockMvc.perform(get("/api/tasks").param("status", "IN_PROGRESS"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.items", hasSize(0)))
+                .andExpect(jsonPath("$.totalElements").value(0))
+                .andExpect(jsonPath("$.totalPages").value(0));
+    }
+
+    @ParameterizedTest(name = "SCRUM-6-AC-07: GET /api/tasks?{0} returns 400 for parameter status")
+    @ValueSource(strings = {"status=DONEE", "status=done", "status=", "status=TODO,DONE", "status=TODO&status=DONE",
+            "status=DONE&status=DONE"})
+    @Tag("SCRUM-6")
+    @DisplayName("SCRUM-6-AC-07: unknown, wrong-case, empty, comma-separated or repeated status returns 400")
+    void listInvalidStatusReturns400(String query) throws Exception {
+        mockMvc.perform(get("/api/tasks?" + query))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.timestamp", notNullValue()))
+                .andExpect(jsonPath("$.status").value(400))
+                .andExpect(jsonPath("$.error").value("Bad Request"))
+                .andExpect(jsonPath("$.message").value("Invalid value for parameter 'status'"))
+                .andExpect(jsonPath("$.path").value("/api/tasks"))
+                .andExpect(jsonPath("$.fieldErrors", hasSize(0)));
+
+        verifyNoInteractions(taskService);
+    }
+
+    @Test
+    @Tag("SCRUM-6")
+    @DisplayName("SCRUM-6-AC-07: parseStatusFilter accepts exactly one exact enum name and treats absence as no filter")
+    void parseStatusFilterRules() {
+        assertThat(TaskController.parseStatusFilter(null)).isNull();
+        for (TaskStatus value : TaskStatus.values()) {
+            assertThat(TaskController.parseStatusFilter(new String[] {value.name()})).isEqualTo(value);
+        }
+        for (String[] invalid : List.of(new String[0], new String[] {""}, new String[] {"done"},
+                new String[] {"TODO", "DONE"})) {
+            assertThatThrownBy(() -> TaskController.parseStatusFilter(invalid))
+                    .isInstanceOf(InvalidQueryParameterException.class)
+                    .hasMessage("Invalid value for parameter 'status'");
+        }
     }
 }
