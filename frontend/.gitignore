@@ -1,0 +1,9 @@
+# SCRUM-1: build and test outputs (never committed)
+node_modules/
+dist/
+reports/
+coverage/
+*.tsbuildinfo
+.env
+.env.local
+.env.*.local
