@@ -1,4 +1,4 @@
-import { screen, within } from '@testing-library/react'
+import { act, screen, within } from '@testing-library/react'
 import { http, HttpResponse } from 'msw'
 import { API, deferred, errorBody } from '../test/fixtures'
 import { bodyLog, requestLog, seedManyTasks, seedTasks, storedTask } from '../test/handlers'
@@ -131,6 +131,25 @@ describe('SCRUM-1 edit task', () => {
     expect(currentPath(router)).toBe('/')
   })
 
+  it('SCRUM-1-AC-06: leaving the page while the PUT is in flight does not navigate when it completes', async () => {
+    seedTasks([{ title: 'Slow save' }])
+    const gate = deferred()
+    server.use(
+      http.put(`${API}/tasks/1`, async () => {
+        await gate.promise
+        return HttpResponse.json(storedTask(1))
+      }),
+    )
+    const { user, router } = renderApp('/tasks/1/edit')
+    await user.click(await screen.findByRole('button', { name: 'Save changes' }))
+    await user.click(screen.getByRole('link', { name: 'New task' }))
+    expect(await screen.findByRole('heading', { name: 'New task' })).toBeInTheDocument()
+    gate.resolve()
+    await act(() => gate.promise)
+    expect(currentPath(router)).toBe('/tasks/new')
+    expect(screen.getByRole('heading', { name: 'New task' })).toBeInTheDocument()
+  })
+
   it('SCRUM-1-AC-11: GET 404 shows "Task not found" with a link back to the list and no form', async () => {
     const { user, router } = renderApp('/tasks/42/edit')
     expect(await screen.findByRole('heading', { name: 'Task not found' })).toBeInTheDocument()
@@ -165,6 +184,9 @@ describe('SCRUM-1 edit task', () => {
     expect(parsePageParam('0')).toBe(1)
     expect(parsePageParam('3')).toBe(3)
     expect(parsePageParam('99999999999999999999')).toBe(1)
+    // The API's `page` is a Java int: 0-based 2^31 - 1 is the largest value the backend accepts.
+    expect(parsePageParam('2147483648')).toBe(2147483648)
+    expect(parsePageParam('2147483649')).toBe(1)
     expect(parseTaskId(undefined)).toBeUndefined()
     expect(parseTaskId('12')).toBe(12)
     expect(parseTaskId('99999999999999999999')).toBeUndefined()

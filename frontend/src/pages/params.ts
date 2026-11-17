@@ -1,10 +1,13 @@
 // URL parameter helpers for the pages (SCRUM-1-AC-02, AC-11, AC-12).
 
-/** `?page=N` is 1-based for humans; missing/invalid/< 1 → 1. */
+/** Largest 1-based page whose 0-based API value still fits the backend's Java `int page` parameter. */
+export const MAX_PAGE_PARAM = 2 ** 31
+
+/** `?page=N` is 1-based for humans; missing/invalid/< 1/beyond the backend's int range → 1. */
 export function parsePageParam(raw: string | null): number {
   if (raw === null || !/^\d+$/.test(raw)) return 1
   const page = Number(raw)
-  return Number.isSafeInteger(page) && page >= 1 ? page : 1
+  return Number.isSafeInteger(page) && page >= 1 && page <= MAX_PAGE_PARAM ? page : 1
 }
 
 /** Positive safe integer, else undefined (non-numeric id → "Task not found" without a request). */

@@ -193,8 +193,8 @@ export const routes: RouteObject[] = [{
 - **List page in the URL:** the current list page is the search param `page` (1-based for humans: `/?page=3`
   → API `page=2`). Missing/invalid/`<1` → page 1. This makes paging survive refresh and Back (AC-02, AC-12).
 - **Id parsing:** `TaskEditPage` parses `:id` with `/^[1-9]\d*$/` (positive safe integer). Anything else renders
-  the "Task not found" state **without** issuing a request (AC-11/AC-12; MSW `onUnhandledFrame: 'error'` makes
-  a stray request fail the test).
+  the "Task not found" state **without** issuing a request (AC-11/AC-12; the `request:unhandled` guard in
+  `src/test/setup.ts` makes a stray request fail the test — see ADR 0007).
 - **Return target:** the list's Edit links pass `state={{ returnTo: '/?page=N' }}`. After a successful edit or
   Cancel, navigate to `location.state?.returnTo ?? '/'` (validated to start with `/`). After create, always
   navigate to `/` (first page, AC-04 — newest first means the new task is on page 1).
@@ -408,7 +408,8 @@ Exposure:
 
 - **Runner/env:** Vitest 5 `environment: 'jsdom'`, `globals: true`, `setupFiles: ['./src/test/setup.ts']`.
 - **Network:** MSW 3 node server (`msw/node` `setupServer`). `setup.ts`:
-  `beforeAll(() => server.listen({ onUnhandledFrame: 'error' }))`,
+  `beforeAll(() => server.listen({ onUnhandledFrame: 'error' }))` plus a `request:unhandled` listener whose
+  `afterEach` check fails the test (`'error'` alone only logs and rejects `fetch` — ADR 0007),
   `afterEach(() => { server.resetHandlers(); resetStore(); cleanup() })`, `afterAll(() => server.close())`.
   Default handlers in `handlers.ts` implement the four endpoints over an in-memory store seeded per test
   (`seedTasks(n)`), mirroring SCRUM-2 semantics (newest first, `page`/`size`, 404 body, 400 body with

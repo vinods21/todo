@@ -19,8 +19,14 @@ failure.
   **@testing-library/jest-dom 7.0.1** (`/vitest` entry).
 - **MSW 3.0.6 node server** (`setupServer` from `msw/node`) intercepts `fetch` at the network layer. Default
   handlers implement the four endpoints over an in-memory store with SCRUM-2 semantics; tests override with
-  `server.use(...)`. `server.listen({ onUnhandledFrame: 'error' })` (MSW 3 option name) makes any unexpected
-  request fail the test — used to prove "no request sent" (AC-06 Cancel, AC-07, AC-11 non-numeric id).
+  `server.use(...)`. `server.listen({ onUnhandledFrame: 'error' })` (MSW 3 option name; v2's `onUnhandledRequest`
+  no longer type-checks) does **not** by itself fail a test: in MSW 3.0.6 it only logs
+  `[MSW] Error: intercepted a request without a matching request handler` and makes the `fetch` reject with
+  `TypeError: fetch failed`, which the app renders as a network error, so the test can still pass. Therefore
+  `src/test/setup.ts` also registers a `server.events.on('request:unhandled', ...)` listener that records every
+  unhandled request, and its `afterEach` throws `Unhandled request(s) in test: ...`, failing the test (verified with
+  a probe test during review). "No request sent" (AC-06 Cancel, AC-07, AC-11 non-numeric id) is additionally
+  asserted positively via the default handlers' `requestLog`.
 - Components are rendered through the real route table with `createMemoryRouter`; queries use roles/labels only.
 - **Traceability naming:** one top-level `describe('SCRUM-1 <area>')` per file (the frontend equivalent of
   `@Tag("SCRUM-1")`); every `it` name starts with `SCRUM-1-AC-xx`/`SCRUM-1-NFR-xx`. Vitest's **junit reporter**
@@ -38,4 +44,6 @@ failure.
   are exercised, but drift between the mock handlers and the real API is only caught by the manual smoke test
   until E2E/contract tests exist (candidate for SCRUM-7).
 - jsdom is not a real browser: CORS, layout and native date-picker behaviour are not tested.
+- The unhandled-request guard lives in `afterEach`, so a stray request is reported after the test body finishes
+  (the failure names the request); a request issued after the test's last `afterEach` is not caught.
 - Reviewers reject test files without the `SCRUM-1 …` describe or `it` names without an AC/NFR prefix.

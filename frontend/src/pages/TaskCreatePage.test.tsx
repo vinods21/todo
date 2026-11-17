@@ -1,6 +1,6 @@
-import { screen, waitFor } from '@testing-library/react'
+import { act, screen, waitFor } from '@testing-library/react'
 import { http, HttpResponse } from 'msw'
-import { API, deferred, errorBody } from '../test/fixtures'
+import { API, deferred, errorBody, makeTask } from '../test/fixtures'
 import { bodyLog, requestLog, seedTasks } from '../test/handlers'
 import { currentPath, renderApp } from '../test/renderApp'
 import { server } from '../test/server'
@@ -90,13 +90,54 @@ describe('SCRUM-1 create task', () => {
   it('SCRUM-1-AC-08: a 400 without fieldErrors shows the response message at form level', async () => {
     server.use(
       http.post(`${API}/tasks`, () =>
-        HttpResponse.json(errorBody(400, "Invalid value for field 'dueDate'"), { status: 400 }),
+        HttpResponse.json(errorBody(400, 'Malformed JSON request'), { status: 400 }),
       ),
     )
     const { user } = renderApp('/tasks/new')
     await user.type(screen.getByLabelText('Title'), 'X')
     await user.click(screen.getByRole('button', { name: 'Create task' }))
-    expect(await screen.findByRole('alert')).toHaveTextContent("Invalid value for field 'dueDate'")
+    expect(await screen.findByRole('alert')).toHaveTextContent('Malformed JSON request')
+    expect(screen.getByLabelText('Title')).toHaveValue('X')
+  })
+
+  it('SCRUM-1-AC-08: a backend type error (invalid dueDate) is shown inline next to Due date', async () => {
+    // Real SCRUM-2 shape for a Jackson InvalidFormatException (GlobalExceptionHandler#handleHttpMessageNotReadable).
+    server.use(
+      http.post(`${API}/tasks`, () =>
+        HttpResponse.json(
+          errorBody(400, "Invalid value for field 'dueDate'", [{ field: 'dueDate', message: 'invalid value' }]),
+          { status: 400 },
+        ),
+      ),
+    )
+    const { user } = renderApp('/tasks/new')
+    await user.type(screen.getByLabelText('Title'), 'X')
+    await user.type(screen.getByLabelText('Due date'), '2026-12-31')
+    await user.click(screen.getByRole('button', { name: 'Create task' }))
+    const dueDate = screen.getByLabelText('Due date')
+    await waitFor(() => expect(dueDate).toHaveAccessibleDescription('invalid value'))
+    expect(dueDate).toHaveAttribute('aria-invalid', 'true')
+    expect(dueDate).toHaveFocus()
+  })
+
+  it('SCRUM-1-AC-04: leaving the page while the POST is in flight does not navigate when it completes', async () => {
+    const gate = deferred()
+    server.use(
+      http.post(`${API}/tasks`, async () => {
+        await gate.promise
+        return HttpResponse.json(makeTask({ id: 1, title: 'Slow' }), { status: 201 })
+      }),
+    )
+    const { user, router } = renderApp('/tasks/new')
+    await user.type(screen.getByLabelText('Title'), 'Slow')
+    await user.click(screen.getByRole('button', { name: 'Create task' }))
+    await user.click(screen.getByRole('button', { name: 'Cancel' }))
+    await user.click(await screen.findByRole('link', { name: 'Create your first task' }))
+    expect(currentPath(router)).toBe('/tasks/new')
+    gate.resolve()
+    await act(() => gate.promise)
+    expect(currentPath(router)).toBe('/tasks/new')
+    expect(screen.getByRole('heading', { name: 'New task' })).toBeInTheDocument()
   })
 
   it('SCRUM-1-AC-09: double clicking submit sends a single POST', async () => {

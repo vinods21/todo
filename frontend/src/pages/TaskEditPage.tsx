@@ -8,6 +8,7 @@ import { TaskForm } from '../components/TaskForm'
 import { TaskNotFound } from '../components/TaskNotFound'
 import { mapServerErrors, toFormValues, toUpdateRequest, type FormErrors, type TaskFormValues } from '../components/taskForm'
 import { useAsync } from '../hooks/useAsync'
+import { useIsMounted } from '../hooks/useIsMounted'
 import { parseTaskId, returnTarget } from './params'
 
 /** SCRUM-1-AC-05..AC-11 */
@@ -19,6 +20,7 @@ export function TaskEditPage() {
 
 function EditTask({ id }: { id: number }) {
   const navigate = useNavigate()
+  const isMounted = useIsMounted()
   const location = useLocation()
   const returnTo = returnTarget(location.state)
   const [deleted, setDeleted] = useState(false)
@@ -37,7 +39,8 @@ function EditTask({ id }: { id: number }) {
       if (isApiError(error) && error.kind === 'validation') return mapServerErrors(error)
       return { fields: {}, form: isApiError(error) ? error.message : GENERIC_ERROR_MESSAGE }
     }
-    await navigate(returnTo)
+    // Skipped if the user already left (Cancel or another link) while the PUT was in flight.
+    if (isMounted()) await navigate(returnTo)
     return undefined
   }
 

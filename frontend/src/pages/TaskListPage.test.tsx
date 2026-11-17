@@ -139,4 +139,17 @@ describe('SCRUM-1 task list', () => {
     await waitFor(() => expect(calls).toBe(2))
     expect(await screen.findByRole('button', { name: 'Retry' })).toBeInTheDocument()
   })
+
+  it('SCRUM-1-AC-10: a 404 from the list endpoint (wrong API base URL) shows a generic error, not "Task not found"', async () => {
+    server.use(
+      http.get(`${API}/tasks`, () =>
+        HttpResponse.json(errorBody(404, 'No endpoint GET /api/api/tasks'), { status: 404 }),
+      ),
+    )
+    renderApp('/')
+    const alert = await screen.findByRole('alert')
+    expect(alert).toHaveTextContent('Something went wrong. Please try again.')
+    expect(alert).not.toHaveTextContent('Task not found')
+    expect(within(alert).getByRole('button', { name: 'Retry' })).toBeInTheDocument()
+  })
 })

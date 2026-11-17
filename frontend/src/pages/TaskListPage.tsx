@@ -1,5 +1,6 @@
 import { useCallback } from 'react'
 import { Link, useSearchParams } from 'react-router'
+import { GENERIC_ERROR_MESSAGE } from '../api/errors'
 import { listTasks } from '../api/tasks'
 import { ErrorPanel } from '../components/ErrorPanel'
 import { Loading } from '../components/Loading'
@@ -20,7 +21,13 @@ export function TaskListPage() {
     <section>
       <h1>Tasks</h1>
       {result.status === 'loading' && <Loading label="Loading tasks…" />}
-      {result.status === 'error' && <ErrorPanel message={result.error.message} onRetry={result.reload} />}
+      {result.status === 'error' && (
+        <ErrorPanel
+          // A 404 here means a wrong VITE_API_BASE_URL, not a missing task: don't show "Task not found".
+          message={result.error.kind === 'not-found' ? GENERIC_ERROR_MESSAGE : result.error.message}
+          onRetry={result.reload}
+        />
+      )}
       {result.status === 'success' &&
         (result.data.items.length === 0 ? (
           page === 1 ? (
