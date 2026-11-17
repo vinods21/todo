@@ -14,9 +14,11 @@ import org.springframework.transaction.annotation.Transactional;
 import java.time.Clock;
 import java.time.Instant;
 import java.time.temporal.ChronoUnit;
+import java.util.Objects;
 
 /**
- * Task business logic (SCRUM-2-AC-03..AC-08, AC-12). Owns transactions, defaults and not-found semantics.
+ * Task business logic (SCRUM-2-AC-03..AC-08, AC-12; SCRUM-6-AC-01, AC-02, AC-05). Owns transactions, defaults and
+ * not-found semantics.
  */
 @Service
 @Transactional
@@ -54,6 +56,12 @@ public class TaskService {
         return taskRepository.findAll(PageRequest.of(page, size, DEFAULT_SORT));
     }
 
+    /** SCRUM-6-AC-05, SCRUM-6-NFR-08: filtering happens in the database, same ordering as {@link #list(int, int)}. */
+    @Transactional(readOnly = true)
+    public Page<Task> listByStatus(int page, int size, TaskStatus status) {
+        return taskRepository.findByStatus(status, PageRequest.of(page, size, DEFAULT_SORT));
+    }
+
     /**
      * SCRUM-2-AC-06: full replacement of the mutable fields only; id and createdAt are never changed.
      */
@@ -63,6 +71,17 @@ public class TaskService {
         task.setDescription(request.description());
         task.setStatus(request.status());
         task.setDueDate(request.dueDate());
+        return taskRepository.save(task);
+    }
+
+    /**
+     * SCRUM-6-AC-01, AC-02: changes only the status. Any transition is allowed (A-01); setting the current status
+     * again is a successful no-op.
+     */
+    public Task updateStatus(long id, TaskStatus status) {
+        Objects.requireNonNull(status, "status");
+        Task task = get(id);
+        task.setStatus(status);
         return taskRepository.save(task);
     }
 

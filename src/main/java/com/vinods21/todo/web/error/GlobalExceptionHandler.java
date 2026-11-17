@@ -1,6 +1,7 @@
 package com.vinods21.todo.web.error;
 
 import com.vinods21.todo.service.TaskNotFoundException;
+import com.vinods21.todo.web.InvalidQueryParameterException;
 import jakarta.servlet.http.HttpServletRequest;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -56,6 +57,18 @@ public class GlobalExceptionHandler extends ResponseEntityExceptionHandler {
         ApiError body = ApiError.of(HttpStatus.NOT_FOUND, "Task with id " + ex.getId() + " not found",
                 request.getRequestURI(), List.of());
         return ResponseEntity.status(HttpStatus.NOT_FOUND).body(body);
+    }
+
+    /**
+     * SCRUM-6-AC-07: a query parameter with a disallowed value; same message and shape as
+     * {@link #handleTypeMismatch} so clients see one format for bad query parameters.
+     */
+    @ExceptionHandler(InvalidQueryParameterException.class)
+    public ResponseEntity<ApiError> handleInvalidQueryParameter(InvalidQueryParameterException ex,
+            HttpServletRequest request) {
+        ApiError body = ApiError.of(HttpStatus.BAD_REQUEST, "Invalid value for parameter '" + ex.getParameterName() + "'",
+                request.getRequestURI(), List.of());
+        return ResponseEntity.badRequest().body(body);
     }
 
     /** SCRUM-2-AC-14: generic 500, details logged server-side only. */
