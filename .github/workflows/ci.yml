@@ -59,3 +59,65 @@ jobs:
             target/surefire-reports/
             target/site/jacoco/
           if-no-files-found: warn
+
+  # SCRUM-1-NFR-06: frontend lint, typecheck, tests (+coverage gate, junit) and production build artifact.
+  frontend:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: frontend
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version-file: frontend/.nvmrc
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+
+      - name: Install
+        run: npm ci
+
+      - name: Audit runtime dependencies
+        run: npm audit --omit=dev --audit-level=high
+
+      - name: Lint
+        run: npm run lint
+
+      - name: Typecheck
+        run: npm run typecheck
+
+      - name: Test with coverage gate
+        run: npm run test:coverage
+
+      - name: Build
+        run: npm run build # GITHUB_SHA / GITHUB_REF_NAME / GITHUB_HEAD_REF feed build-info (SCRUM-1-NFR-09)
+
+      - name: Test & coverage summary
+        if: always()
+        run: |
+          if [ -f reports/coverage/coverage-summary.json ]; then
+            node -e 'const s=require("./reports/coverage/coverage-summary.json").total.lines.pct; console.log(`### SCRUM-1 frontend line coverage: ${s}%`)' >> "$GITHUB_STEP_SUMMARY"
+          fi
+          if [ -f reports/junit.xml ]; then
+            echo "### SCRUM-1 acceptance criteria exercised by tests" >> "$GITHUB_STEP_SUMMARY"
+            { grep -o 'SCRUM-1-AC-[0-9]*' reports/junit.xml || true; } | sort -u | tr '\n' ' ' >> "$GITHUB_STEP_SUMMARY"
+            echo >> "$GITHUB_STEP_SUMMARY"
+          fi
+
+      - name: Upload dist
+        uses: actions/upload-artifact@v4
+        with:
+          name: todo-frontend-SCRUM-1-${{ github.sha }}
+          path: frontend/dist/ # upload-artifact ignores working-directory: repo-relative path
+          if-no-files-found: error
+
+      - name: Upload test & coverage reports
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: todo-frontend-SCRUM-1-${{ github.sha }}-reports
+          path: |
+            frontend/reports/junit.xml
+            frontend/reports/coverage/
+          if-no-files-found: warn
