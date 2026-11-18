@@ -3,7 +3,7 @@ import { execSync } from 'node:child_process'
 import react from '@vitejs/plugin-react'
 import { defineConfig, type Plugin } from 'vite'
 
-// SCRUM-1-NFR-09: build identity (Jira key, git commit, branch, build time).
+// SCRUM-1-NFR-09: build identity (Jira key, git commit, branch, build time); SCRUM-8: + version.
 function git(args: string): string | undefined {
   try {
     const out = execSync(`git ${args}`, { stdio: ['ignore', 'pipe', 'ignore'] }).toString().trim()
@@ -26,7 +26,12 @@ const branch =
     process.env.GITHUB_REF_NAME,
     git('rev-parse --abbrev-ref HEAD'),
   ) ?? 'unknown'
-const builtAt = new Date().toISOString()
+// SCRUM-8-AC-04 (ADR 0013): product/build version from CI (APP_VERSION); local builds say 0.0.0-SNAPSHOT.
+const version = firstNonEmpty(process.env.APP_VERSION) ?? '0.0.0-SNAPSHOT'
+// SCRUM-8-NFR-03: reproducible bundles — the Release workflow sets SOURCE_DATE_EPOCH to the commit time.
+const epoch = process.env.SOURCE_DATE_EPOCH
+const builtAt =
+  epoch && /^\d+$/.test(epoch) ? new Date(Number(epoch) * 1000).toISOString() : new Date().toISOString()
 
 function buildInfo(): Plugin {
   return {
@@ -36,7 +41,7 @@ function buildInfo(): Plugin {
       return [
         {
           tag: 'meta',
-          attrs: { name: 'build-info', content: `${jira} ${commit}` },
+          attrs: { name: 'build-info', content: `${jira} ${commit} ${version}` },
           injectTo: 'head',
         },
       ]
@@ -45,7 +50,7 @@ function buildInfo(): Plugin {
       this.emitFile({
         type: 'asset',
         fileName: 'build-info.json',
-        source: `${JSON.stringify({ jira, commit, branch, builtAt }, null, 2)}\n`,
+        source: `${JSON.stringify({ jira, commit, branch, version, builtAt }, null, 2)}\n`,
       })
     },
   }
