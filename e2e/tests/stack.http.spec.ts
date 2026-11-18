@@ -86,7 +86,11 @@ test('SCRUM-7-AC-06, SCRUM-7-AC-19: /actuator/health is proxied and UP; other ac
 }) => {
   const health = await request.get('/actuator/health')
   expect(health.status()).toBe(200)
-  expect(await health.json()).toEqual({ status: 'UP' })
+  // In a container Spring Boot also lists its probe groups (liveness/readiness); no components or details.
+  const body = (await health.json()) as Record<string, unknown>
+  expect(body.status).toBe('UP')
+  expect(body).not.toHaveProperty('components')
+  expect(body).not.toHaveProperty('details')
   for (const path of ['/actuator/info', '/actuator/env', '/actuator']) {
     expect((await request.get(path)).status(), path).toBe(404)
   }
