@@ -1,0 +1,25 @@
+#!/usr/bin/env bash
+# Test stub for `gh api` (SCRUM-8-AC-08 tests). STUB_RELEASE: absent (default) | published | draft | error.
+set -euo pipefail
+args="$*"
+state="${STUB_RELEASE:-absent}"
+if [ "$state" = "error" ]; then
+  echo "gh: Server Error (HTTP 500)" >&2
+  exit 1
+fi
+if [[ "$args" == *"--paginate"* ]]; then
+  if [ "$state" = "published" ]; then printf '%s\t%s\tfalse\n' "$STUB_RELEASE_TAG" "$STUB_RELEASE_TAG"; fi
+  if [ "$state" = "draft" ]; then printf 'untagged-123\t%s\ttrue\n' "$STUB_RELEASE_TAG"; fi
+  if [ -n "${STUB_OTHER_RELEASES:-}" ]; then printf '%s\t%s\tfalse\n' "$STUB_OTHER_RELEASES" "$STUB_OTHER_RELEASES"; fi
+  exit 0
+fi
+if [[ "$args" == *"/releases/tags/"* ]]; then
+  if [ "$state" = "published" ]; then
+    echo '{"tag_name":"'"$STUB_RELEASE_TAG"'","draft":false}'
+    exit 0
+  fi
+  echo "gh: Not Found (HTTP 404)" >&2
+  exit 1
+fi
+echo "stub gh: unsupported $args" >&2
+exit 2

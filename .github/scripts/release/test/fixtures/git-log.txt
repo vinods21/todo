@@ -1,0 +1,4 @@
+0f27ee9dfbbf72882723c92170e942000f61e988	SCRUM-8: [DEV] stamp the product version into the backend jar via ${revision}
+e0ee1e9aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa	SCRUM-8: [ARCH] add release pipeline design, ADRs 0013-0014 and traceability template
+ad51007bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb	SCRUM-7: [REVIEW] block path-parameter traversal through the nginx proxy
+1234567ccccccccccccccccccccccccccccccccc	Initial commit

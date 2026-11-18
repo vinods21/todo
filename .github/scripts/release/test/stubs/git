@@ -1,0 +1,18 @@
+#!/usr/bin/env bash
+# Test stub for `git ls-remote` (SCRUM-8-AC-08 tests). STUB_REMOTE_TAGS: space-separated tags on the remote;
+# STUB_GIT_FAIL=1: network error.
+set -euo pipefail
+if [ "${STUB_GIT_FAIL:-}" = "1" ]; then
+  echo "fatal: unable to access remote: Could not resolve host" >&2
+  exit 128
+fi
+if [ "${1:-}" != "ls-remote" ]; then
+  echo "stub git: unsupported command $*" >&2
+  exit 2
+fi
+pattern="${4:-}"
+for t in ${STUB_REMOTE_TAGS:-}; do
+  if [ -z "$pattern" ] || [ "$pattern" = "refs/tags/$t" ]; then
+    printf '%s\trefs/tags/%s\n' "1111111111111111111111111111111111111111" "$t"
+  fi
+done
