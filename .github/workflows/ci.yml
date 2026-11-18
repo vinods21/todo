@@ -247,18 +247,22 @@ jobs:
         run: docker compose up -d --no-build --wait --wait-timeout 240
 
       - name: Verify images and containers (SCRUM-7-AC-22, NFR-01, NFR-02, NFR-03, NFR-05, NFR-06)
+        if: ${{ !cancelled() && steps.stack.outcome == 'success' }}
         run: .github/scripts/verify-images.sh "todo-backend:${TODO_IMAGE_TAG}" "todo-frontend:${TODO_IMAGE_TAG}"
 
       - name: Install e2e dependencies
+        if: ${{ !cancelled() && steps.stack.outcome == 'success' }}
         working-directory: e2e
         run: npm ci
 
       - name: Playwright version
+        if: ${{ !cancelled() && steps.stack.outcome == 'success' }}
         id: pw
         working-directory: e2e
         run: echo "version=$(node -p 'require("./node_modules/@playwright/test/package.json").version')" >> "$GITHUB_OUTPUT"
 
       - name: Cache Playwright browsers
+        if: ${{ !cancelled() && steps.stack.outcome == 'success' }}
         id: pw-cache
         uses: actions/cache@v4
         with:
@@ -266,6 +270,7 @@ jobs:
           key: playwright-${{ runner.os }}-${{ steps.pw.outputs.version }}
 
       - name: Install Chromium
+        if: ${{ !cancelled() && steps.stack.outcome == 'success' }}
         working-directory: e2e
         env:
           CACHE_HIT: ${{ steps.pw-cache.outputs.cache-hit }}
@@ -277,6 +282,7 @@ jobs:
           fi
 
       - name: E2E against Compose (SCRUM-7-AC-18, AC-19)
+        if: ${{ !cancelled() && steps.stack.outcome == 'success' }}
         working-directory: e2e
         env:
           E2E_EXPECT_EMPTY_DB: "1"

@@ -62,8 +62,10 @@ for svc in backend frontend; do
   fi
 
   # 4. NFR-06: no secret-bearing build arguments or env files in the history.
-  if docker history --no-trunc --format '{{ .CreatedBy }}' "$img" | grep -Eq 'DB_PASSWORD|POSTGRES_PASSWORD|NPM_TOKEN|_authToken|\.env'; then
-    fail "$svc: docker history mentions a secret-bearing value"; result="FAIL"
+  # `.env` only as a whole file name (the nginx base image legitimately ships `*.envsh` entrypoint scripts).
+  secret_re='DB_PASSWORD|POSTGRES_PASSWORD|NPM_TOKEN|_authToken|(^|[^[:alnum:]_])\.env([^[:alnum:]_]|$)'
+  if hits=$(docker history --no-trunc --format '{{ .CreatedBy }}' "$img" | grep -E "$secret_re"); then
+    fail "$svc: docker history mentions a secret-bearing value: $(echo "$hits" | head -n 3 | cut -c1-300)"; result="FAIL"
   fi
 
   # 5. NFR-03: size target (warning only).
