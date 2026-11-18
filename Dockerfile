@@ -31,9 +31,10 @@ WORKDIR /app
 COPY --from=build /workspace/app.jar /app/app.jar
 USER 10001:10001
 EXPOSE 8080
-# NFR-07: busybox wget ships with the base image; non-2xx (DOWN = 503) → unhealthy.
+# NFR-07: busybox wget ships with the base image; non-2xx (DOWN = 503) → unhealthy. JSON form (hadolint DL3025);
+# sh -c only to honour SERVER_PORT.
 HEALTHCHECK --interval=10s --timeout=3s --start-period=90s --retries=3 \
-  CMD wget -q -O /dev/null "http://127.0.0.1:${SERVER_PORT:-8080}/actuator/health" || exit 1
+  CMD ["sh", "-c", "wget -q -O /dev/null \"http://127.0.0.1:${SERVER_PORT:-8080}/actuator/health\" || exit 1"]
 # AC-03: exec form → the JVM is PID 1 and receives SIGTERM (Boot graceful shutdown). NFR-12: container-aware heap.
 # Extra JVM flags: JAVA_TOOL_OPTIONS. Configuration: DB_URL, DB_USERNAME, DB_PASSWORD, SERVER_PORT, APP_CORS_ALLOWED_ORIGINS.
 ENTRYPOINT ["java", "-XX:MaxRAMPercentage=75.0", "-XX:+ExitOnOutOfMemoryError", "-jar", "/app/app.jar"]
