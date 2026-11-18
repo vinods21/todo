@@ -1,0 +1,870 @@
+# SCRUM-8 (ADR 0013/0014, design §6.2) — one pipeline, two modes:
+#   RELEASE: workflow_dispatch on main with dry_run=false → jobs `publish` + `verify` run (environment `release`).
+#   DRY RUN: push (feature/**, main), pull_request, or dispatch with dry_run=true → everything up to `release-gate`;
+#            no tag, no image push, no release, no attestation (SCRUM-8-AC-11). Read-only token everywhere.
+# Build once (SCRUM-8-AC-25): `backend`/`frontend` produce the tested jar/tarball; `images` packages exactly those bytes
+# into OCI archives; `sbom`, `scan`, (SCRUM-9 e2e) and `publish` all use the same archives and files.
+# Every action is pinned to a full commit SHA (NFR-02, design §6.4); downloaded CLIs are pinned + checksum-verified in
+# .github/scripts/release/install-tools.sh. Untrusted values (branch names, dispatch inputs) reach scripts via env only.
+name: Release
+
+on:
+  push:
+    branches:
+      - "feature/**"
+      - main
+  pull_request:
+  workflow_dispatch:
+    inputs:
+      bump:
+        description: "Version bump from the latest vX.Y.Z tag (ignored if 'version' is set)"
+        type: choice
+        options: [patch, minor, major]
+        default: patch
+      version:
+        description: "Explicit version X.Y.Z (optional; must be greater than the latest release)"
+        type: string
+        default: ""
+      dry_run:
+        description: "Dry run: build, test, SBOM, scan and gate only — publish nothing"
+        type: boolean
+        default: false
+
+permissions:
+  contents: read
+
+concurrency:
+  # SCRUM-8-AC-06: one real release at a time, never cancelled; dry runs queue per ref.
+  group: ${{ (github.event_name == 'workflow_dispatch' && inputs.dry_run == false) && 'release-publish' || format('release-dry-run-{0}', github.ref) }}
+  cancel-in-progress: false
+
+env:
+  IMAGE_BACKEND: ghcr.io/vinods21/todo-backend
+  IMAGE_FRONTEND: ghcr.io/vinods21/todo-frontend
+
+jobs:
+  version: # SCRUM-8-AC-02, AC-03, AC-06, AC-08 (read-only), NFR-06
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    outputs:
+      mode: ${{ steps.plan.outputs.mode }}
+      version: ${{ steps.plan.outputs.version }} # stamped into every artefact
+      release_version: ${{ steps.plan.outputs.release_version }} # would-be release in dry-run
+      build_version: ${{ steps.plan.outputs.build_version }}
+      previous_tag: ${{ steps.plan.outputs.previous_tag }} # "" before the first release
+      image_tags: ${{ steps.plan.outputs.image_tags }} # "X.Y.Z-<id> X.Y.Z X.Y latest"
+      jira_key: ${{ steps.plan.outputs.jira_key }}
+      branch: ${{ steps.plan.outputs.branch }}
+      sha: ${{ steps.plan.outputs.sha }}
+      commit_epoch: ${{ steps.plan.outputs.commit_epoch }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ github.sha }}
+          fetch-depth: 0
+          fetch-tags: true
+          persist-credentials: false
+
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version-file: frontend/.nvmrc
+
+      - name: Plan mode and version (SCRUM-8-AC-02, AC-03, AC-06)
+        id: plan
+        env: # untrusted inputs via env only (NFR-01); validated by version.mjs
+          EVENT_NAME: ${{ github.event_name }}
+          REF: ${{ github.ref }}
+          BRANCH: ${{ github.head_ref || github.ref_name }}
+          SHA: ${{ github.sha }}
+          INPUT_BUMP: ${{ inputs.bump }}
+          INPUT_VERSION: ${{ inputs.version }}
+          INPUT_DRY_RUN: ${{ inputs.dry_run }}
+          ACTOR: ${{ github.actor }}
+        run: node .github/scripts/release/version.mjs plan --github-output "$GITHUB_OUTPUT" --summary "$GITHUB_STEP_SUMMARY"
+
+      - name: Pre-existence check, read-only (SCRUM-8-AC-08)
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+          MODE: dry-run # advisory for GHCR "unknown"; the authoritative re-check runs in `publish`
+          VERSION: ${{ steps.plan.outputs.release_version }}
+          SHA: ${{ github.sha }}
+        run: node .github/scripts/release/preexistence.mjs --summary "$GITHUB_STEP_SUMMARY"
+
+  tooling: # SCRUM-8-AC-12, AC-15 (compose), AC-22, AC-24 (unit), NFR-07
+    needs: version
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    env:
+      JIRA_KEY: ${{ needs.version.outputs.jira_key }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version-file: frontend/.nvmrc
+
+      - name: Install shellcheck (pinned + checksum)
+        run: .github/scripts/release/install-tools.sh shellcheck
+
+      - name: Lint shell scripts (SCRUM-8-NFR-07)
+        run: shellcheck .github/scripts/*.sh .github/scripts/release/*.sh .github/scripts/release/test/stubs/*
+
+      - name: Release tooling tests (SCRUM-8-AC-12, AC-24)
+        run: >
+          mkdir -p reports &&
+          node --test --test-reporter=spec --test-reporter-destination=stdout
+          --test-reporter=junit --test-reporter-destination=reports/release-tooling-junit.xml
+          ".github/scripts/release/test/*.test.mjs"
+
+      - name: Allow-list check (SCRUM-8-AC-22)
+        run: >
+          node .github/scripts/release/vuln-gate.mjs check-allowlist
+          --allowlist .github/security/vulnerability-allowlist.json --today "$(date -u +%F)" --summary "$GITHUB_STEP_SUMMARY"
+
+      - name: Compose image overrides (SCRUM-8-AC-15)
+        run: .github/scripts/release/check-compose-images.sh
+
+      - name: AC summary
+        if: always()
+        run: |
+          if [ -f reports/release-tooling-junit.xml ]; then
+            tests=$(grep -c '<testcase' reports/release-tooling-junit.xml || true)
+            failed=$(grep -c '<failure' reports/release-tooling-junit.xml || true)
+            echo "### Release tooling tests: ${tests} tests, ${failed} failed (SCRUM-8-AC-12, AC-24)" | tee -a "$GITHUB_STEP_SUMMARY"
+            { grep -oE 'SCRUM-[0-9]+-(AC|NFR)-[0-9]+' reports/release-tooling-junit.xml || true; } | sort -uV | tr '\n' ' ' | tee -a "$GITHUB_STEP_SUMMARY"
+            echo >> "$GITHUB_STEP_SUMMARY"
+          fi
+
+      - name: Upload test reports
+        if: always()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: todo-release-tooling-${{ env.JIRA_KEY }}-${{ github.sha }}-reports
+          path: reports/
+          if-no-files-found: warn
+
+  backend: # SCRUM-8-AC-04, AC-07, AC-17 (app), NFR-03
+    needs: version
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    outputs:
+      jar_sha256: ${{ steps.stage.outputs.jar_sha256 }}
+      repro: ${{ steps.repro.outputs.repro }}
+    env:
+      VERSION: ${{ needs.version.outputs.version }}
+      JIRA_KEY: ${{ needs.version.outputs.jira_key }}
+      SHA: ${{ needs.version.outputs.sha }}
+      COMMIT_EPOCH: ${{ needs.version.outputs.commit_epoch }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ needs.version.outputs.sha }}
+          fetch-depth: 0 # git-commit-id-maven-plugin (ADR 0004)
+          persist-credentials: false
+
+      - uses: actions/setup-java@d1374f8ac74474200d16ef8ecee22c7ae7a51880 # v6.3.0
+        with:
+          distribution: temurin
+          java-version: "21"
+          cache: maven
+
+      - name: Build, test, coverage gate (SCRUM-8-AC-07)
+        run: ./mvnw -B -ntp verify "-Drevision=${VERSION}" "-Djira.issue=${JIRA_KEY}" "-Dproject.build.outputTimestamp=${COMMIT_EPOCH}"
+
+      - name: Verify version and identity in the jar (SCRUM-8-AC-04)
+        run: .github/scripts/verify-jar.sh "target/todo-backend-${VERSION}.jar" "$VERSION" "$JIRA_KEY" "$SHA"
+
+      - name: Backend SBOMs (SCRUM-8-AC-17)
+        run: >
+          ./mvnw -B -ntp "-Drevision=${VERSION}" "-Dproject.build.outputTimestamp=${COMMIT_EPOCH}"
+          org.cyclonedx:cyclonedx-maven-plugin:makeBom@runtime org.cyclonedx:cyclonedx-maven-plugin:makeBom@all-scopes
+
+      - name: Stage outputs
+        id: stage
+        run: |
+          mkdir -p out
+          cp "target/todo-backend-${VERSION}.jar" "target/todo-backend-${VERSION}.cdx.json" "target/todo-backend-all-scopes-${VERSION}.cdx.json" out/
+          echo "jar_sha256=$(sha256sum "out/todo-backend-${VERSION}.jar" | cut -d' ' -f1)" >> "$GITHUB_OUTPUT"
+          ls -l out
+          for f in out/*.cdx.json; do echo "$f: $(jq '.components | length' "$f") components, CycloneDX $(jq -r .specVersion "$f")"; done
+
+      - name: Upload test & coverage reports
+        if: always()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: todo-release-backend-${{ env.JIRA_KEY }}-${{ github.sha }}-reports
+          path: |
+            target/surefire-reports/
+            target/site/jacoco/
+          if-no-files-found: warn
+
+      - name: Upload jar and SBOMs
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: todo-release-backend-${{ env.JIRA_KEY }}-${{ github.sha }}
+          path: out/
+          if-no-files-found: error
+          retention-days: 7
+
+      - name: Reproducibility check — report only (SCRUM-8-NFR-03)
+        id: repro
+        run: .github/scripts/release/repro-jar.sh "out/todo-backend-${VERSION}.jar" | tee repro.log && tail -n1 repro.log >> "$GITHUB_OUTPUT"
+
+  frontend: # SCRUM-8-AC-04, AC-07, AC-17 (app), NFR-03
+    needs: version
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    outputs:
+      tarball_sha256: ${{ steps.stage.outputs.tarball_sha256 }}
+      repro: ${{ steps.repro.outputs.repro }}
+    env:
+      VERSION: ${{ needs.version.outputs.version }}
+      JIRA_KEY: ${{ needs.version.outputs.jira_key }} # read by vite.config.ts
+      SHA: ${{ needs.version.outputs.sha }}
+      APP_VERSION: ${{ needs.version.outputs.version }} # read by vite.config.ts (SCRUM-8-AC-04)
+      SOURCE_DATE_EPOCH: ${{ needs.version.outputs.commit_epoch }} # builtAt + tarball mtime (NFR-03)
+      # vite reads GITHUB_SHA (runner default) == github.sha == needs.version.outputs.sha
+    defaults:
+      run:
+        working-directory: frontend
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ needs.version.outputs.sha }}
+          persist-credentials: false
+
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version-file: frontend/.nvmrc
+          cache: npm
+          cache-dependency-path: |
+            frontend/package-lock.json
+            .github/tools/package-lock.json
+
+      - name: Install
+        run: npm ci
+
+      - name: Lint (SCRUM-8-AC-07)
+        run: npm run lint
+
+      - name: Typecheck (SCRUM-8-AC-07)
+        run: npm run typecheck
+
+      - name: Test with coverage gate (SCRUM-8-AC-07)
+        run: npm run test:coverage
+
+      - name: Build
+        run: npm run build
+
+      - name: Verify version and identity (SCRUM-8-AC-04)
+        run: |
+          node -e '
+            const b = require("./dist/build-info.json")
+            const e = process.env
+            const builtAt = new Date(Number(e.SOURCE_DATE_EPOCH) * 1000).toISOString()
+            const bad = []
+            if (b.version !== e.APP_VERSION) bad.push(`version ${b.version} != ${e.APP_VERSION}`)
+            if (b.jira !== e.JIRA_KEY) bad.push(`jira ${b.jira} != ${e.JIRA_KEY}`)
+            if (b.commit !== e.SHA) bad.push(`commit ${b.commit} != ${e.SHA}`)
+            if (b.builtAt !== builtAt) bad.push(`builtAt ${b.builtAt} != ${builtAt} (SOURCE_DATE_EPOCH)`)
+            const meta = `<meta name="build-info" content="${e.JIRA_KEY} ${e.SHA} ${e.APP_VERSION}">`
+            if (!require("fs").readFileSync("dist/index.html", "utf8").includes(meta)) bad.push(`index.html lacks ${meta}`)
+            if (bad.length) { console.log("::error::SCRUM-8-AC-04: " + bad.join("; ")); process.exit(1) }
+            console.log(`dist: version ${b.version}, jira ${b.jira}, commit ${b.commit}, builtAt ${b.builtAt}`)'
+
+      - name: Tarball (SCRUM-8-AC-10, NFR-03)
+        id: stage
+        run: |
+          ../.github/scripts/release/make-tarball.sh dist "../out/todo-frontend-${VERSION}.tar.gz"
+          echo "tarball_sha256=$(sha256sum "../out/todo-frontend-${VERSION}.tar.gz" | cut -d' ' -f1)" >> "$GITHUB_OUTPUT"
+
+      - name: Reproducibility check — report only (SCRUM-8-NFR-03)
+        id: repro
+        run: |
+          mv dist dist-first
+          npm run build > /dev/null
+          ../.github/scripts/release/make-tarball.sh dist ../repro/second.tar.gz > /dev/null
+          a=$(sha256sum "../out/todo-frontend-${VERSION}.tar.gz" | cut -d' ' -f1)
+          b=$(sha256sum ../repro/second.tar.gz | cut -d' ' -f1)
+          if [ "$a" = "$b" ]; then r=yes; d="identical SHA-256 \`$a\`"; else r=no; d="differs: \`$a\` vs \`$b\`"; diff -rq dist-first dist | head -n 20 || true; fi
+          rm -rf dist && mv dist-first dist
+          printf '### Reproducibility — frontend tarball (SCRUM-8-NFR-03, report only)\n\n| artefact | bit-for-bit | detail |\n|---|---|---|\n| `todo-frontend-%s.tar.gz` | %s | %s |\n' "$VERSION" "$r" "$d" | tee -a "$GITHUB_STEP_SUMMARY"
+          echo "repro=$r" >> "$GITHUB_OUTPUT"
+
+      - name: Frontend SBOM (SCRUM-8-AC-17)
+        run: |
+          npm ci --prefix ../.github/tools --no-audit --no-fund
+          ../.github/tools/node_modules/.bin/cyclonedx-npm --omit dev --spec-version 1.6 --output-reproducible \
+            --output-format JSON --output-file "../out/todo-frontend-${VERSION}.cdx.json"
+          echo "$(jq '.components | length' "../out/todo-frontend-${VERSION}.cdx.json") components"
+
+      - name: Upload test & coverage reports
+        if: always()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: todo-release-frontend-${{ env.JIRA_KEY }}-${{ github.sha }}-reports
+          path: |
+            frontend/reports/junit.xml
+            frontend/reports/coverage/
+          if-no-files-found: warn
+
+      - name: Upload tarball and SBOM
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: todo-release-frontend-${{ env.JIRA_KEY }}-${{ github.sha }}
+          path: out/
+          if-no-files-found: error
+          retention-days: 7
+
+  images: # SCRUM-8-AC-04, AC-13 (local), AC-14, AC-25
+    needs: [version, backend, frontend]
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    outputs:
+      backend_digest: ${{ steps.digests.outputs.backend }}
+      frontend_digest: ${{ steps.digests.outputs.frontend }}
+    env:
+      VERSION: ${{ needs.version.outputs.version }}
+      JIRA_KEY: ${{ needs.version.outputs.jira_key }}
+      SHA: ${{ needs.version.outputs.sha }}
+      BRANCH: ${{ needs.version.outputs.branch }} # untrusted: env / action inputs only
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ needs.version.outputs.sha }}
+          persist-credentials: false
+
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: todo-release-backend-${{ env.JIRA_KEY }}-${{ github.sha }}
+          path: in/backend
+
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: todo-release-frontend-${{ env.JIRA_KEY }}-${{ github.sha }}
+          path: in/frontend
+
+      - name: Prebuilt contexts — the tested bytes (build once, SCRUM-8-AC-25)
+        run: |
+          mkdir -p ctx/backend-jar ctx/frontend-dist images
+          cp "in/backend/todo-backend-${VERSION}.jar" ctx/backend-jar/app.jar
+          tar -xzf "in/frontend/todo-frontend-${VERSION}.tar.gz" -C ctx/frontend-dist
+          echo "BUILD_DATE=$(date -u +%Y-%m-%dT%H:%M:%SZ)" >> "$GITHUB_ENV"
+
+      - uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4.4.1
+
+      - name: Build backend image once → OCI archive (SCRUM-8-AC-13, AC-25)
+        id: backend
+        uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7.4.0
+        with:
+          context: .
+          file: Dockerfile
+          platforms: linux/amd64
+          push: false
+          provenance: false
+          sbom: false
+          build-contexts: backend-jar=ctx/backend-jar
+          outputs: type=oci,dest=images/todo-backend.oci.tar
+          tags: ${{ env.IMAGE_BACKEND }}:${{ env.VERSION }}
+          build-args: |
+            JAR_SOURCE=prebuilt
+            VERSION=${{ env.VERSION }}
+            JIRA_KEY=${{ env.JIRA_KEY }}
+            GIT_COMMIT=${{ env.SHA }}
+            GIT_BRANCH=${{ env.BRANCH }}
+            BUILD_DATE=${{ env.BUILD_DATE }}
+          cache-from: type=gha,scope=release-backend
+          cache-to: type=gha,scope=release-backend,mode=max
+
+      - name: Build frontend image once → OCI archive (SCRUM-8-AC-13, AC-25)
+        id: frontend
+        uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7.4.0
+        with:
+          context: frontend
+          file: frontend/Dockerfile
+          platforms: linux/amd64
+          push: false
+          provenance: false
+          sbom: false
+          build-contexts: frontend-dist=ctx/frontend-dist
+          outputs: type=oci,dest=images/todo-frontend.oci.tar
+          tags: ${{ env.IMAGE_FRONTEND }}:${{ env.VERSION }}
+          build-args: |
+            DIST_SOURCE=prebuilt
+            VERSION=${{ env.VERSION }}
+            JIRA_KEY=${{ env.JIRA_KEY }}
+            GIT_COMMIT=${{ env.SHA }}
+            GIT_BRANCH=${{ env.BRANCH }}
+            BUILD_DATE=${{ env.BUILD_DATE }}
+          cache-from: type=gha,scope=release-frontend
+          cache-to: type=gha,scope=release-frontend,mode=max
+
+      - name: Digests (SCRUM-8-AC-25)
+        id: digests
+        env:
+          BACKEND_ACTION_DIGEST: ${{ steps.backend.outputs.digest }}
+          FRONTEND_ACTION_DIGEST: ${{ steps.frontend.outputs.digest }}
+        run: |
+          b=$(.github/scripts/release/oci-digest.sh images/todo-backend.oci.tar "$BACKEND_ACTION_DIGEST")
+          f=$(.github/scripts/release/oci-digest.sh images/todo-frontend.oci.tar "$FRONTEND_ACTION_DIGEST")
+          echo "backend=$b" >> "$GITHUB_OUTPUT"
+          echo "frontend=$f" >> "$GITHUB_OUTPUT"
+          echo "backend ${IMAGE_BACKEND}@$b"
+          echo "frontend ${IMAGE_FRONTEND}@$f"
+          ls -l images
+
+      - name: Load for verification
+        run: |
+          skopeo --version
+          skopeo copy "oci-archive:images/todo-backend.oci.tar" "docker-daemon:${IMAGE_BACKEND}:${VERSION}"
+          skopeo copy "oci-archive:images/todo-frontend.oci.tar" "docker-daemon:${IMAGE_FRONTEND}:${VERSION}"
+
+      - name: Verify labels and payload (SCRUM-8-AC-04, AC-14, AC-25)
+        run: .github/scripts/release/verify-release-images.sh "${IMAGE_BACKEND}:${VERSION}" "${IMAGE_FRONTEND}:${VERSION}" in/backend in/frontend
+
+      - name: Upload OCI archives
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: todo-release-images-${{ env.JIRA_KEY }}-${{ github.sha }}
+          path: images/
+          if-no-files-found: error
+          compression-level: 0
+          retention-days: 7
+
+  sbom: # SCRUM-8-AC-17, AC-18
+    needs: [version, backend, frontend, images]
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    env:
+      VERSION: ${{ needs.version.outputs.version }}
+      JIRA_KEY: ${{ needs.version.outputs.jira_key }}
+      SHA: ${{ needs.version.outputs.sha }}
+      BACKEND_DIGEST: ${{ needs.images.outputs.backend_digest }}
+      FRONTEND_DIGEST: ${{ needs.images.outputs.frontend_digest }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ needs.version.outputs.sha }}
+          persist-credentials: false
+
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: todo-release-backend-${{ env.JIRA_KEY }}-${{ github.sha }}
+          path: in/backend
+
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: todo-release-frontend-${{ env.JIRA_KEY }}-${{ github.sha }}
+          path: in/frontend
+
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: todo-release-images-${{ env.JIRA_KEY }}-${{ github.sha }}
+          path: images
+
+      - name: Install Trivy and cyclonedx-cli (pinned + checksum, NFR-02)
+        run: .github/scripts/release/install-tools.sh trivy cyclonedx-cli
+
+      - id: day
+        run: echo "day=$(date -u +%F)" >> "$GITHUB_OUTPUT"
+
+      - name: Trivy cache (Java DB for jar identification)
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ~/.cache/trivy
+          key: trivy-db-sbom-${{ steps.day.outputs.day }}
+          restore-keys: |
+            trivy-db-sbom-
+            trivy-db-
+
+      - name: Image SBOMs from the OCI archives (SCRUM-8-AC-17)
+        run: |
+          mkdir -p sbom
+          trivy image --input images/todo-backend.oci.tar --format cyclonedx --cache-dir ~/.cache/trivy --quiet \
+            --output "sbom/todo-backend-image-${VERSION}.cdx.json"
+          trivy image --input images/todo-frontend.oci.tar --format cyclonedx --cache-dir ~/.cache/trivy --quiet \
+            --output "sbom/todo-frontend-image-${VERSION}.cdx.json"
+          cp "in/backend/todo-backend-${VERSION}.cdx.json" "in/frontend/todo-frontend-${VERSION}.cdx.json" sbom/
+
+      - name: Finalize SBOMs — root component, commit, version; no runner paths (SCRUM-8-AC-17, NFR-11)
+        run: >
+          node .github/scripts/release/sbom-finalize.mjs --version "$VERSION" --sha "$SHA" --jira "$JIRA_KEY"
+          --digest "backend-image=${BACKEND_DIGEST}" --digest "frontend-image=${FRONTEND_DIGEST}"
+          --counts sbom/sbom-counts.json --summary "$GITHUB_STEP_SUMMARY"
+          "sbom/todo-backend-${VERSION}.cdx.json" "sbom/todo-frontend-${VERSION}.cdx.json"
+          "sbom/todo-backend-image-${VERSION}.cdx.json" "sbom/todo-frontend-image-${VERSION}.cdx.json"
+
+      - name: Validate against the CycloneDX schema (SCRUM-8-AC-17)
+        run: .github/scripts/release/validate-sboms.sh sbom/*.cdx.json
+
+      - name: Upload SBOMs
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: todo-release-sbom-${{ env.JIRA_KEY }}-${{ github.sha }}
+          path: sbom/
+          if-no-files-found: error
+
+  scan: # SCRUM-8-AC-19..AC-24
+    needs: [version, backend, frontend, images]
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    env:
+      VERSION: ${{ needs.version.outputs.version }}
+      JIRA_KEY: ${{ needs.version.outputs.jira_key }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ needs.version.outputs.sha }}
+          persist-credentials: false
+
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version-file: frontend/.nvmrc
+
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: todo-release-backend-${{ env.JIRA_KEY }}-${{ github.sha }}
+          path: in/backend
+
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: todo-release-frontend-${{ env.JIRA_KEY }}-${{ github.sha }}
+          path: in/frontend
+
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: todo-release-images-${{ env.JIRA_KEY }}-${{ github.sha }}
+          path: images
+
+      - name: Install Trivy (pinned + checksum, NFR-02)
+        run: .github/scripts/release/install-tools.sh trivy
+
+      - id: day
+        run: echo "day=$(date -u +%F)" >> "$GITHUB_OUTPUT"
+
+      - name: Trivy DB cache (per UTC day)
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ~/.cache/trivy
+          key: trivy-db-${{ steps.day.outputs.day }}
+          restore-keys: trivy-db-
+
+      - name: Update vulnerability DBs — fails closed (SCRUM-8-AC-21)
+        run: |
+          mkdir -p scan
+          trivy image --download-db-only --cache-dir ~/.cache/trivy
+          trivy image --download-java-db-only --cache-dir ~/.cache/trivy
+          trivy version --cache-dir ~/.cache/trivy --format json > scan/trivy-version.json
+          cat scan/trivy-version.json
+
+      - name: Scan dependencies and images (SCRUM-8-AC-19, AC-20)
+        run: .github/scripts/release/scan.sh "$VERSION"
+
+      - name: Gate self-test against the live scanner (SCRUM-8-AC-24)
+        run: node --test-reporter=spec .github/scripts/release/test/live-gate-selftest.mjs --cache-dir ~/.cache/trivy --db scan/trivy-version.json | tee scan/live-gate-selftest.txt
+
+      - name: Vulnerability gate (SCRUM-8-AC-21, AC-22, AC-23)
+        run: >
+          node .github/scripts/release/vuln-gate.mjs gate
+          --allowlist .github/security/vulnerability-allowlist.json --db scan/trivy-version.json --today "$(date -u +%F)"
+          --gated backend-runtime=scan/backend-runtime.json --gated frontend-prod=scan/frontend-prod.json
+          --gated backend-image=scan/backend-image.json --gated frontend-image=scan/frontend-image.json
+          --reported backend-all-scopes=scan/backend-all-scopes.json --reported frontend-all=scan/frontend-all.json
+          --out scan/verdict.json --markdown scan/summary.md --summary "$GITHUB_STEP_SUMMARY"
+
+      - name: Upload scan reports
+        if: always()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: todo-release-scan-${{ env.JIRA_KEY }}-${{ github.sha }}
+          path: scan/
+          if-no-files-found: warn
+
+  code-scanning: # SCRUM-8-AC-23 (SARIF → Security tab); reporting only, not a gate
+    needs: [version, scan]
+    if: ${{ !cancelled() && needs.scan.result != 'skipped' && (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository) }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: read
+      security-events: write
+    strategy:
+      fail-fast: false
+      matrix:
+        target: [backend-runtime, frontend-prod, backend-image, frontend-image]
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false # upload-sarif reads commit/ref from the checkout
+
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: todo-release-scan-${{ needs.version.outputs.jira_key }}-${{ github.sha }}
+          path: scan
+
+      - uses: github/codeql-action/upload-sarif@33d7b85da1a04171e211befe2c739303b9a4c066 # v4.39.3
+        with:
+          sarif_file: scan/${{ matrix.target }}.sarif
+          category: trivy-${{ matrix.target }}
+
+  # ══════════════════════════════════════════════════════════════════════════════════════════════════════════════
+  # RELEASE GATE — the single aggregation point (SCRUM-8-AC-07). `publish` needs only this job (plus outputs).
+  # SCRUM-9: add the pre-release e2e job to `needs` below. It must consume the SAME images: download artifact
+  # todo-release-images-<JIRA_KEY>-<sha>, `skopeo copy oci-archive:… docker-daemon:<IMAGE>:<version>`, then
+  # TODO_BACKEND_IMAGE=$IMAGE_BACKEND TODO_FRONTEND_IMAGE=$IMAGE_FRONTEND TODO_IMAGE_TAG=<version>
+  # docker compose --profile app up --no-build -d --wait  (design §6.5).
+  # ══════════════════════════════════════════════════════════════════════════════════════════════════════════════
+  release-gate:
+    needs: [version, tooling, backend, frontend, images, sbom, scan]
+    if: ${{ !cancelled() }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    env:
+      MODE: ${{ needs.version.outputs.mode }}
+      VERSION: ${{ needs.version.outputs.version }}
+      RELEASE_VERSION: ${{ needs.version.outputs.release_version }}
+      BUILD_VERSION: ${{ needs.version.outputs.build_version }}
+      SHA: ${{ needs.version.outputs.sha }}
+      JIRA_KEY: ${{ needs.version.outputs.jira_key }}
+      PREVIOUS_TAG: ${{ needs.version.outputs.previous_tag }}
+      IMAGE_TAGS: ${{ needs.version.outputs.image_tags }}
+      COMMIT_EPOCH: ${{ needs.version.outputs.commit_epoch }}
+      BACKEND_DIGEST: ${{ needs.images.outputs.backend_digest }}
+      FRONTEND_DIGEST: ${{ needs.images.outputs.frontend_digest }}
+      JAR_SHA256: ${{ needs.backend.outputs.jar_sha256 }}
+      TARBALL_SHA256: ${{ needs.frontend.outputs.tarball_sha256 }}
+      JAR_REPRO: ${{ needs.backend.outputs.repro }}
+      TARBALL_REPRO: ${{ needs.frontend.outputs.repro }}
+      REPO: ${{ github.repository }}
+      RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+      CANDIDATE_ARTIFACT: todo-release-candidate-${{ needs.version.outputs.jira_key }}-${{ github.sha }}
+    steps:
+      - name: Every gate passed
+        env:
+          NEEDS: ${{ toJSON(needs) }}
+        run: >
+          node -e 'const n = JSON.parse(process.env.NEEDS);
+          const bad = Object.entries(n).filter(([, v]) => v.result !== "success");
+          for (const [k, v] of Object.entries(n)) console.log(`${k}: ${v.result}`);
+          if (bad.length) { console.log("::error::SCRUM-8-AC-07: gate inputs not successful: " + bad.map(([k, v]) => k + "=" + v.result).join(", ")); process.exit(1) }'
+
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ needs.version.outputs.sha }}
+          fetch-depth: 0 # release notes need history and tags
+          fetch-tags: true
+          persist-credentials: false
+
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version-file: frontend/.nvmrc
+
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: todo-release-backend-${{ env.JIRA_KEY }}-${{ github.sha }}
+          path: in/backend
+
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: todo-release-frontend-${{ env.JIRA_KEY }}-${{ github.sha }}
+          path: in/frontend
+
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: todo-release-sbom-${{ env.JIRA_KEY }}-${{ github.sha }}
+          path: in/sbom
+
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: todo-release-scan-${{ env.JIRA_KEY }}-${{ github.sha }}
+          path: in/scan
+
+      - name: Assemble release-candidate bundle (SCRUM-8-AC-10, AC-11, AC-25, AC-26)
+        run: .github/scripts/release/assemble-candidate.sh
+
+      - name: Upload release candidate (SCRUM-8-AC-11)
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: ${{ env.CANDIDATE_ARTIFACT }}
+          path: candidate/
+          if-no-files-found: error
+          retention-days: 30
+
+  publish: # SCRUM-8-AC-08..AC-10, AC-13, AC-16, AC-18, AC-25, NFR-05 — RELEASE MODE ONLY
+    needs: [version, images, release-gate]
+    if: ${{ needs.version.outputs.mode == 'release' && github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    environment:
+      name: release # deployment branch policy: main only (design §12)
+      url: ${{ steps.release.outputs.url }}
+    permissions:
+      contents: write # annotated tag + release
+      packages: write # GHCR push
+      id-token: write # Sigstore OIDC (attestations)
+      attestations: write
+    env:
+      VERSION: ${{ needs.version.outputs.version }}
+      SHA: ${{ needs.version.outputs.sha }}
+      JIRA_KEY: ${{ needs.version.outputs.jira_key }}
+      IMAGE_TAGS: ${{ needs.version.outputs.image_tags }}
+      BACKEND_DIGEST: ${{ needs.images.outputs.backend_digest }}
+      FRONTEND_DIGEST: ${{ needs.images.outputs.frontend_digest }}
+      GH_TOKEN: ${{ github.token }}
+      REPO: ${{ github.repository }}
+      RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ needs.version.outputs.sha }}
+          persist-credentials: false
+
+      - name: 1. Download candidate
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: todo-release-candidate-${{ env.JIRA_KEY }}-${{ github.sha }}
+          path: candidate
+
+      - name: 1. Download images
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: todo-release-images-${{ env.JIRA_KEY }}-${{ github.sha }}
+          path: images
+
+      - name: 2. Re-verify the bundle and digests (SCRUM-8-AC-25)
+        run: |
+          (cd candidate/assets && sha256sum -c SHA256SUMS)
+          .github/scripts/release/oci-digest.sh images/todo-backend.oci.tar "$BACKEND_DIGEST"
+          .github/scripts/release/oci-digest.sh images/todo-frontend.oci.tar "$FRONTEND_DIGEST"
+
+      - name: 3. Log in to GHCR
+        uses: docker/login-action@8aa5831fb8d48d8f76594c7ddde61ae58019f550 # v4.8.0
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ github.token }}
+
+      - name: 4. Authoritative pre-existence check (SCRUM-8-AC-08)
+        env:
+          MODE: release
+        run: node .github/scripts/release/preexistence.mjs --summary "$GITHUB_STEP_SUMMARY"
+
+      - name: 5. Push immutable image tags (SCRUM-8-AC-13, AC-25)
+        run: |
+          read -r id_tag version_tag _ <<<"$IMAGE_TAGS"
+          echo "### Pushed (SCRUM-8-AC-13)" >> "$GITHUB_STEP_SUMMARY"
+          echo "| ref | digest | check |" >> "$GITHUB_STEP_SUMMARY"
+          echo "|---|---|---|" >> "$GITHUB_STEP_SUMMARY"
+          .github/scripts/release/push-image.sh images/todo-backend.oci.tar "$IMAGE_BACKEND" "$BACKEND_DIGEST" "$id_tag" "$version_tag"
+          .github/scripts/release/push-image.sh images/todo-frontend.oci.tar "$IMAGE_FRONTEND" "$FRONTEND_DIGEST" "$id_tag" "$version_tag"
+
+      - name: 6. Attest backend image — provenance (SCRUM-8-AC-16)
+        uses: actions/attest@1e69f48acb82d1966a394da916b4c1698aa569d6 # v4.2.2
+        with:
+          subject-name: ${{ env.IMAGE_BACKEND }}
+          subject-digest: ${{ env.BACKEND_DIGEST }}
+          push-to-registry: true
+          create-storage-record: false
+
+      - name: 6. Attest backend image — SBOM (SCRUM-8-AC-16, AC-18)
+        uses: actions/attest@1e69f48acb82d1966a394da916b4c1698aa569d6 # v4.2.2
+        with:
+          subject-name: ${{ env.IMAGE_BACKEND }}
+          subject-digest: ${{ env.BACKEND_DIGEST }}
+          sbom-path: candidate/assets/todo-backend-image-${{ env.VERSION }}.cdx.json
+          push-to-registry: true
+          create-storage-record: false
+
+      - name: 6. Attest frontend image — provenance (SCRUM-8-AC-16)
+        uses: actions/attest@1e69f48acb82d1966a394da916b4c1698aa569d6 # v4.2.2
+        with:
+          subject-name: ${{ env.IMAGE_FRONTEND }}
+          subject-digest: ${{ env.FRONTEND_DIGEST }}
+          push-to-registry: true
+          create-storage-record: false
+
+      - name: 6. Attest frontend image — SBOM (SCRUM-8-AC-16, AC-18)
+        uses: actions/attest@1e69f48acb82d1966a394da916b4c1698aa569d6 # v4.2.2
+        with:
+          subject-name: ${{ env.IMAGE_FRONTEND }}
+          subject-digest: ${{ env.FRONTEND_DIGEST }}
+          sbom-path: candidate/assets/todo-frontend-image-${{ env.VERSION }}.cdx.json
+          push-to-registry: true
+          create-storage-record: false
+
+      - name: 7. Attest release files — provenance (SCRUM-8-AC-16)
+        uses: actions/attest@1e69f48acb82d1966a394da916b4c1698aa569d6 # v4.2.2
+        with:
+          subject-path: candidate/assets/*
+          create-storage-record: false
+
+      - name: 8. Annotated tag on the built commit (SCRUM-8-AC-09)
+        run: .github/scripts/release/create-tag.sh "v${VERSION}" "$SHA"
+
+      - name: 9. Draft release with all assets (SCRUM-8-AC-10, AC-18)
+        run: >
+          gh release create "v${VERSION}" --repo "$REPO" --verify-tag --draft --title "v${VERSION}"
+          --notes-file candidate/release-notes.md candidate/assets/*
+
+      - name: 10. Publish the release (SCRUM-8-AC-10, AC-29)
+        id: release
+        run: |
+          gh release edit "v${VERSION}" --repo "$REPO" --draft=false --prerelease=false --latest
+          echo "url=$(gh release view "v${VERSION}" --repo "$REPO" --json url --jq .url)" >> "$GITHUB_OUTPUT"
+
+      - name: 11. Move convenience tags X.Y and latest (SCRUM-8-AC-13)
+        run: |
+          read -r _ _ minor_tag latest_tag <<<"$IMAGE_TAGS"
+          .github/scripts/release/push-image.sh images/todo-backend.oci.tar "$IMAGE_BACKEND" "$BACKEND_DIGEST" "$minor_tag" "$latest_tag"
+          .github/scripts/release/push-image.sh images/todo-frontend.oci.tar "$IMAGE_FRONTEND" "$FRONTEND_DIGEST" "$minor_tag" "$latest_tag"
+
+      - name: 12. Summary
+        if: always()
+        env:
+          URL: ${{ steps.release.outputs.url }}
+        run: |
+          {
+            echo "## Release v${VERSION}"
+            echo
+            echo "- release: ${URL:-not published}"
+            echo "- commit: \`$SHA\`"
+            echo "- ${IMAGE_BACKEND}@${BACKEND_DIGEST} (${IMAGE_TAGS})"
+            echo "- ${IMAGE_FRONTEND}@${FRONTEND_DIGEST} (${IMAGE_TAGS})"
+            echo
+            echo "On failure: docs/release/RELEASE.md#failure-recovery — any published artefact burns v${VERSION}; never overwrite."
+          } >> "$GITHUB_STEP_SUMMARY"
+
+  verify: # SCRUM-8-AC-16, AC-28 — RELEASE MODE ONLY
+    needs: [version, images, publish]
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      contents: read
+      packages: read
+      attestations: read
+    env:
+      VERSION: ${{ needs.version.outputs.version }}
+      SHA: ${{ needs.version.outputs.sha }}
+      IMAGE_TAGS: ${{ needs.version.outputs.image_tags }}
+      BACKEND_DIGEST: ${{ needs.images.outputs.backend_digest }}
+      FRONTEND_DIGEST: ${{ needs.images.outputs.frontend_digest }}
+      GH_TOKEN: ${{ github.token }}
+      REPO: ${{ github.repository }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ needs.version.outputs.sha }}
+          persist-credentials: false
+
+      - uses: docker/login-action@8aa5831fb8d48d8f76594c7ddde61ae58019f550 # v4.8.0
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ github.token }}
+
+      - name: Post-publish verification (SCRUM-8-AC-16, AC-28)
+        run: .github/scripts/release/verify-release.sh
