@@ -1,5 +1,6 @@
 // SCRUM-7-AC-19 (+ AC-02, AC-04..AC-06, NFR-12): HTTP-level smoke of the composed stack — request API only, no
 // browser. Project `http` (compose mode).
+import http from 'node:http'
 import { expect, test, type APIResponse } from '@playwright/test'
 import { env } from './support/env'
 import { API_ERROR_KEYS, expectedIdentity, TasksApi, uniqueTitle, type Task } from './support/fixtures'
@@ -93,6 +94,60 @@ test('SCRUM-7-AC-06, SCRUM-7-AC-19: /actuator/health is proxied and UP; other ac
   expect(body).not.toHaveProperty('details')
   for (const path of ['/actuator/info', '/actuator/env', '/actuator']) {
     expect((await request.get(path)).status(), path).toBe(404)
+  }
+})
+
+/** GET with the path sent byte-for-byte (Playwright's request API resolves "..", "%2e" etc. client-side). */
+function rawGet(path: string): Promise<{ status: number; contentType: string; body: string }> {
+  const url = new URL(env.baseURL)
+  return new Promise((resolve, reject) => {
+    const req = http.get({ host: url.hostname, port: url.port || 80, path }, (res) => {
+      let body = ''
+      res.setEncoding('utf8')
+      res.on('data', (chunk: string) => (body += chunk))
+      res.on('end', () =>
+        resolve({ status: res.statusCode ?? 0, contentType: String(res.headers['content-type'] ?? ''), body }),
+      )
+    })
+    req.on('error', reject)
+  })
+}
+
+test('SCRUM-7-AC-06, SCRUM-7-NFR-12: encoded, traversal and path-parameter variants of actuator paths are answered 404 by nginx', async () => {
+  // Positive controls: the raw client reaches the proxy; ';' in a query string is not blocked.
+  const health = await rawGet('/actuator/health')
+  expect(health.status).toBe(200)
+  expect(JSON.parse(health.body)).toMatchObject({ status: 'UP' })
+  expect((await rawGet('/api/tasks?size=1&q=a;b')).status).toBe(200)
+
+  for (const path of [
+    '/actuator',
+    '/actuator/',
+    '/actuator/info',
+    '/actuator/env',
+    '/actuator/health/',
+    '/actuator/health/liveness',
+    '//actuator/env',
+    '/actuator/../actuator/env',
+    '/actuator/%2e%2e/actuator/info',
+    '/api/../actuator/env',
+    '/api/%2e%2e/actuator/info',
+    '/api%2F..%2Factuator%2Finfo',
+    '/%61ctuator/env',
+    '/%61ctuator/info',
+    '/actuator%2Finfo',
+    // Tomcat strips ";…" before resolving "..": without the nginx guard these would reach /actuator/info.
+    '/api/..;/actuator/info',
+    '/api/tasks/..;/..;/actuator/info',
+    '/api/;/../actuator/info',
+    '/actuator/health/..;/info',
+    '/actuator/health;/../info',
+    '/actuator/health/..;/..',
+  ]) {
+    const response = await rawGet(path)
+    expect(response.status, `${path}: ${response.body.slice(0, 200)}`).toBe(404)
+    expect(response.contentType, `${path} must be answered by nginx, not the backend`).toContain('text/html')
+    expect(response.body, path).not.toMatch(/"build"|"_links"|"propertySources"|"git"/)
   }
 })
 

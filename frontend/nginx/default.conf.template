@@ -29,13 +29,22 @@ server {
     }
 
     # AC-06: API → backend. No URI in proxy_pass: the original path + query string are forwarded unchanged.
+    # Path-confusion guard (also below): locations match the normalised URI, but the RAW $request_uri is forwarded,
+    # and Tomcat drops ";…" path parameters before resolving "..", so /api/..;/actuator/info would reach the
+    # backend's /actuator/info (a raw "#" likewise ends nginx's URI). The API never uses ;, #, %2F or %5C in paths.
     location ^~ /api/ {
+        if ($request_uri ~ "^[^?]*([;#]|%2[fF]|%5[cC])") {
+            return 404;
+        }
         proxy_pass $backend;
         include /etc/nginx/snippets/proxy.conf;
     }
 
     # AC-06: health only (Q-05: /actuator/info is checked on the backend port, not proxied).
     location = /actuator/health {
+        if ($request_uri ~ "^[^?]*([;#]|%2[fF]|%5[cC])") {
+            return 404;
+        }
         proxy_pass $backend;
         include /etc/nginx/snippets/proxy.conf;
     }
