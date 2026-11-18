@@ -107,6 +107,23 @@ class TodoApplicationIntegrationTest {
     }
 
     @Test
+    @Tag("SCRUM-8")
+    @DisplayName("SCRUM-8-AC-04: /actuator/info build.version equals the version the build was stamped with")
+    void infoCarriesBuildVersion() {
+        ResponseEntity<String> response = call(HttpMethod.GET, "/actuator/info", null);
+
+        assertThat(response.getStatusCode().value()).isEqualTo(200);
+        String version = JsonPath.read(response.getBody(), "$.build.version");
+        // Release X.Y.Z, build version X.Y.Z-<id> (ADR 0013) or the local placeholder 0.0.0-SNAPSHOT.
+        assertThat(version).matches("^\\d+\\.\\d+\\.\\d+(-[0-9A-Za-z-.]+)?$");
+        // Set by Maven Surefire from ${project.version} (CI: -Drevision=<build version>; local: 0.0.0-SNAPSHOT).
+        String expected = System.getProperty("build.version.expected");
+        if (expected != null) {
+            assertThat(version).isEqualTo(expected);
+        }
+    }
+
+    @Test
     @DisplayName("SCRUM-2-AC-03, SCRUM-2-AC-04, SCRUM-2-AC-06, SCRUM-2-AC-07, SCRUM-2-AC-08: CRUD round-trip against PostgreSQL")
     void crudRoundTrip() {
         // AC-03: create

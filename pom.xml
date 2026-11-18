@@ -14,17 +14,23 @@
 
     <groupId>com.vinods21</groupId>
     <artifactId>todo-backend</artifactId>
-    <version>0.1.0-SNAPSHOT</version>
+    <!-- SCRUM-8 / ADR 0013: CI-friendly version. Placeholder for local builds only; CI and the Release workflow pass
+         -Drevision=<X.Y.Z | X.Y.Z-<sha7>>. Releases come from Git tags vX.Y.Z — never edit this value. -->
+    <version>${revision}</version>
     <packaging>jar</packaging>
     <name>todo-backend</name>
     <description>To-Do application backend (Jira SCRUM-2, epic SCRUM-5)</description>
 
     <properties>
+        <!-- SCRUM-8-AC-05: local placeholder version (see <version> above) -->
+        <revision>0.0.0-SNAPSHOT</revision>
         <java.version>21</java.version>
         <!-- ADR 0008: overridden by CI with -Djira.issue=<key derived from the branch>; UNKNOWN for local builds -->
         <jira.issue>UNKNOWN</jira.issue>
         <jacoco.version>0.8.13</jacoco.version>
         <git-commit-id-plugin.version>9.0.1</git-commit-id-plugin.version>
+        <!-- SCRUM-8-AC-17 / ADR 0014: application SBOMs (makeBom@runtime, makeBom@all-scopes; not bound to a phase) -->
+        <cyclonedx-maven-plugin.version>2.9.3</cyclonedx-maven-plugin.version>
     </properties>
 
     <dependencies>
@@ -169,6 +175,8 @@
                     <!-- ADR 0008: lets TodoApplicationIntegrationTest assert /actuator/info build.jira == the configured key -->
                     <systemPropertyVariables>
                         <build.jira.expected>${jira.issue}</build.jira.expected>
+                        <!-- SCRUM-8-AC-04: /actuator/info build.version == the version the build was stamped with -->
+                        <build.version.expected>${project.version}</build.version.expected>
                     </systemPropertyVariables>
                 </configuration>
             </plugin>
@@ -216,6 +224,36 @@
                                     </limits>
                                 </rule>
                             </rules>
+                        </configuration>
+                    </execution>
+                </executions>
+            </plugin>
+            <!-- SCRUM-8-AC-17 (design §7.1): CycloneDX application SBOMs, called explicitly by the Release workflow -->
+            <plugin>
+                <groupId>org.cyclonedx</groupId>
+                <artifactId>cyclonedx-maven-plugin</artifactId>
+                <version>${cyclonedx-maven-plugin.version}</version>
+                <configuration>
+                    <projectType>application</projectType>
+                    <schemaVersion>1.6</schemaVersion>
+                    <outputFormat>json</outputFormat>
+                    <includeLicenseText>false</includeLicenseText>
+                </configuration>
+                <executions>
+                    <execution>
+                        <id>runtime</id>
+                        <phase>none</phase>
+                        <configuration>
+                            <outputName>todo-backend-${project.version}.cdx</outputName>
+                            <includeTestScope>false</includeTestScope>
+                        </configuration>
+                    </execution>
+                    <execution>
+                        <id>all-scopes</id>
+                        <phase>none</phase>
+                        <configuration>
+                            <outputName>todo-backend-all-scopes-${project.version}.cdx</outputName>
+                            <includeTestScope>true</includeTestScope>
                         </configuration>
                     </execution>
                 </executions>
