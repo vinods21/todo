@@ -85,10 +85,12 @@ services:
       start_period: 10s
       start_interval: 1s
     read_only: true                      # NFR-12
+    # Owned by the nginx user (UID/GID 101): a tmpfs is root-owned by default and the entrypoint could not render
+    # default.conf into conf.d (CI run 44227861909).
     tmpfs:
-      - /tmp                             # pid file, client body temp (nginx-unprivileged)
-      - /var/cache/nginx
-      - /etc/nginx/conf.d                # entrypoint renders default.conf here at start
+      - /tmp:uid=101,gid=101,mode=0755             # pid file, client body temp (nginx-unprivileged)
+      - /var/cache/nginx:uid=101,gid=101,mode=0755
+      - /etc/nginx/conf.d:uid=101,gid=101,mode=0755  # entrypoint renders default.conf here at start
     cap_drop: [ALL]
     security_opt:
       - no-new-privileges:true
