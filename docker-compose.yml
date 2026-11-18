@@ -1,22 +1,97 @@
-# SCRUM-2-NFR-03: reproducible local PostgreSQL 16 for development.
-# Credentials are local-dev defaults only (match application.yml defaults); not real secrets.
+# SCRUM-2-NFR-03 + SCRUM-7 (AC-07..AC-12, design §6). Credentials are LOCAL-DEVELOPMENT DEFAULTS, not secrets.
+#   PostgreSQL only (local dev):  docker compose up -d
+#   Whole stack:                  docker compose --profile app up --build -d --wait   → http://localhost:3000
+# Override any ${TODO_*} via environment or a git-ignored .env (see .env.example).
 services:
   postgres:
-    image: postgres:16-alpine
-    container_name: todo-postgres
+    image: postgres:16-alpine            # same tag as the Testcontainers integration tests (ADR 0010)
+    container_name: todo-postgres        # kept (existing name; README/dev habits)
     environment:
-      POSTGRES_DB: todo
-      POSTGRES_USER: todo
-      POSTGRES_PASSWORD: todo
+      POSTGRES_DB: ${TODO_DB_NAME:-todo}
+      POSTGRES_USER: ${TODO_DB_USER:-todo}
+      POSTGRES_PASSWORD: ${TODO_DB_PASSWORD:-todo}
     ports:
-      - "5432:5432"
+      - "${TODO_DB_PORT:-5432}:5432"
     volumes:
       - todo-pgdata:/var/lib/postgresql/data
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U todo -d todo"]
+      test: ["CMD-SHELL", "pg_isready -U \"$${POSTGRES_USER}\" -d \"$${POSTGRES_DB}\""]
       interval: 5s
       timeout: 5s
       retries: 10
+      start_period: 10s
+      start_interval: 1s
+
+  backend:
+    profiles: [app]
+    build:
+      context: .
+      dockerfile: Dockerfile
+      args:
+        JIRA_KEY: ${JIRA_KEY:-UNKNOWN}
+        GIT_COMMIT: ${GIT_COMMIT:-UNKNOWN}
+        GIT_BRANCH: ${GIT_BRANCH:-UNKNOWN}
+        VERSION: ${TODO_BACKEND_VERSION:-UNKNOWN}
+        BUILD_DATE: ${BUILD_DATE:-UNKNOWN}
+    image: todo-backend:${TODO_IMAGE_TAG:-local}
+    environment:
+      DB_URL: jdbc:postgresql://postgres:5432/${TODO_DB_NAME:-todo}
+      DB_USERNAME: ${TODO_DB_USER:-todo}
+      DB_PASSWORD: ${TODO_DB_PASSWORD:-todo}
+      SERVER_PORT: "8080"
+      APP_CORS_ALLOWED_ORIGINS: ${TODO_CORS_ALLOWED_ORIGINS:-http://localhost:5173}   # AC-12: dev mode
+    ports:
+      - "${TODO_BACKEND_PORT:-8080}:8080"   # AC-12: curl/debug and Vite dev mode
+    depends_on:
+      postgres:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "wget", "-q", "-O", "/dev/null", "http://127.0.0.1:8080/actuator/health"]
+      interval: 10s
+      timeout: 3s
+      retries: 3
+      start_period: 90s
+      start_interval: 2s
+    read_only: true                      # NFR-12
+    tmpfs:
+      - /tmp                             # Tomcat work dirs, JVM perf data
+    cap_drop: [ALL]
+    security_opt:
+      - no-new-privileges:true
+
+  frontend:
+    profiles: [app]
+    build:
+      context: ./frontend
+      args:
+        JIRA_KEY: ${JIRA_KEY:-UNKNOWN}
+        GIT_COMMIT: ${GIT_COMMIT:-UNKNOWN}
+        GIT_BRANCH: ${GIT_BRANCH:-UNKNOWN}
+        VERSION: ${TODO_FRONTEND_VERSION:-UNKNOWN}
+        BUILD_DATE: ${BUILD_DATE:-UNKNOWN}
+    image: todo-frontend:${TODO_IMAGE_TAG:-local}
+    environment:
+      BACKEND_URL: http://backend:8080
+    ports:
+      - "${TODO_FRONTEND_PORT:-3000}:8080"
+    depends_on:
+      backend:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "wget", "-q", "-O", "/dev/null", "http://127.0.0.1:8080/healthz"]
+      interval: 10s
+      timeout: 3s
+      retries: 3
+      start_period: 10s
+      start_interval: 1s
+    read_only: true                      # NFR-12
+    tmpfs:
+      - /tmp                             # pid file, client body temp (nginx-unprivileged)
+      - /var/cache/nginx
+      - /etc/nginx/conf.d                # entrypoint renders default.conf here at start
+    cap_drop: [ALL]
+    security_opt:
+      - no-new-privileges:true
 
 volumes:
   todo-pgdata:
