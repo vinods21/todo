@@ -2,6 +2,9 @@
 // SCRUM-8-AC-24 (live, ADR 0014): the gate blocks a real fixable HIGH found by the same Trivy binary and DB as the real
 // scan, and passes once a valid allow-list entry covers it. Runs only in the Release `scan` job (needs trivy + DB).
 // The vulnerable lockfile is written to $RUNNER_TEMP at run time — never committed (no dependency-graph pollution).
+// lodash 4.17.20 (fixable HIGH CVE-2021-23337, fixed in 4.17.21): every fixable finding has a CVE/GHSA id, so it can be
+// allow-listed (AC-22). 4.17.15 was dropped: Trivy also reports it as NSWG-ECO-516, an id the allow-list cannot hold
+// (Release run 44362670868).
 // Usage: live-gate-selftest.mjs --cache-dir ~/.cache/trivy --db scan/trivy-version.json
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
@@ -21,7 +24,7 @@ mkdirSync(base, { recursive: true })
 const dir = mkdtempSync(join(base, 'gate-selftest-'))
 const today = new Date().toISOString().slice(0, 10)
 
-writeFileSync(join(dir, 'package.json'), JSON.stringify({ name: 'gate-selftest', version: '1.0.0', dependencies: { lodash: '4.17.15' } }, null, 2))
+writeFileSync(join(dir, 'package.json'), JSON.stringify({ name: 'gate-selftest', version: '1.0.0', dependencies: { lodash: '4.17.20' } }, null, 2))
 writeFileSync(
   join(dir, 'package-lock.json'),
   JSON.stringify(
@@ -31,12 +34,11 @@ writeFileSync(
       lockfileVersion: 3,
       requires: true,
       packages: {
-        '': { name: 'gate-selftest', version: '1.0.0', dependencies: { lodash: '4.17.15' } },
+        '': { name: 'gate-selftest', version: '1.0.0', dependencies: { lodash: '4.17.20' } },
         'node_modules/lodash': {
-          version: '4.17.15',
-          resolved: 'https://registry.npmjs.org/lodash/-/lodash-4.17.15.tgz',
-          integrity: 'sha512-8xOcRHvCjnocdS5cpwXQXVzmmh5e5+saE2QGoeQmbKmRS6J3VQppPOIt0MnmE+4xlZoumy0GPG0D0MVIQbNA1A==',
-        },
+          version: '4.17.20',
+          resolved: 'https://registry.npmjs.org/lodash/-/lodash-4.17.20.tgz',
+                  },
       },
     },
     null,
@@ -54,7 +56,7 @@ function gate(allowlistFile) {
   return { status: r.status, out: r.stdout + r.stderr }
 }
 
-test('SCRUM-8-AC-24 (live): lodash 4.17.15 lockfile → trivy fs → gate BLOCKED', () => {
+test('SCRUM-8-AC-24 (live): lodash 4.17.20 lockfile → trivy fs → gate BLOCKED', () => {
   assert.ok(db, '--db is required')
   const scan = spawnSync(
     'trivy',
@@ -66,7 +68,7 @@ test('SCRUM-8-AC-24 (live): lodash 4.17.15 lockfile → trivy fs → gate BLOCKE
   writeFileSync(empty, JSON.stringify({ version: 1, entries: [] }))
   const r = gate(empty)
   assert.equal(r.status, 1, r.out)
-  assert.match(r.out, /SCRUM-8-AC-21 blocking: (HIGH|CRITICAL) \S+ in lodash 4\.17\.15/)
+  assert.match(r.out, /SCRUM-8-AC-21 blocking: (HIGH|CRITICAL) \S+ in lodash 4\.17\.20/)
 })
 
 test('SCRUM-8-AC-24 (live): the same findings with valid allow-list entries → PASS', () => {
@@ -77,6 +79,8 @@ test('SCRUM-8-AC-24 (live): the same findings with valid allow-list entries → 
     }
   }
   assert.ok(ids.size > 0)
+  const unlistable = [...ids].filter((id) => !/^(CVE-\d{4}-\d{4,}|GHSA(-[23456789cfghjmpqrvwx]{4}){3})$/.test(id))
+  assert.deepEqual(unlistable, [], 'fixture must only have CVE/GHSA ids (allow-list rule, AC-22)')
   const entries = [...ids].map((id) => ({
     id,
     type: 'vulnerability',

@@ -608,7 +608,16 @@ jobs:
           name: todo-release-scan-${{ needs.version.outputs.jira_key }}-${{ github.sha }}
           path: scan
 
-      - uses: github/codeql-action/upload-sarif@33d7b85da1a04171e211befe2c739303b9a4c066 # v4.39.3
+      - name: SARIF present?
+        id: sarif
+        env:
+          TARGET: ${{ matrix.target }}
+        run: |
+          if [ -s "scan/${TARGET}.sarif" ]; then echo "present=true" >> "$GITHUB_OUTPUT"; else
+            echo "::warning::scan/${TARGET}.sarif missing — the scan job failed before this target (its failure is the signal)"; fi
+
+      - if: steps.sarif.outputs.present == 'true'
+        uses: github/codeql-action/upload-sarif@33d7b85da1a04171e211befe2c739303b9a4c066 # v4.39.3
         with:
           sarif_file: scan/${{ matrix.target }}.sarif
           category: trivy-${{ matrix.target }}
