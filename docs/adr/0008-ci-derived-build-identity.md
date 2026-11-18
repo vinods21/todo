@@ -5,6 +5,9 @@
 - Jira: [SCRUM-6](https://suranagivinod.atlassian.net/browse/SCRUM-6) — SCRUM-6-NFR-07, open question Q-03
 - Supersedes in part: [ADR 0004](0004-traceability-conventions.md) — the **Build** and **CI artefacts** bullets
   (hard-coded `jira=SCRUM-<n>` / `X-Jira-Issue` and artifact names). All other ADR 0004 conventions stand.
+- **Amended by [ADR 0013](0013-versioning-and-release-process.md)** (SCRUM-8): the derivation (same regex, same
+  outputs) moves from inline YAML into `.github/scripts/release/version.mjs identity`, which `identity` and the
+  `Release` workflow both call; job `identity` additionally outputs `build_version`. Release builds use key `main`.
 - Related: [SCRUM-1 design §13 follow-up](../architecture/SCRUM-1-design.md) (workflow/artifact naming)
 
 ## Context

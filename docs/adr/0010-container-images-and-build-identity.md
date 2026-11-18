@@ -4,6 +4,11 @@
 - Date: 2026-11-18
 - Jira: [SCRUM-7](https://suranagivinod.atlassian.net/browse/SCRUM-7) — SCRUM-7-AC-01..AC-04, AC-22, NFR-01..NFR-07, NFR-12; open questions Q-03 (decided), Q-04 (decided), Q-01/Q-02 (deferred)
 - Extends: [ADR 0008](0008-ci-derived-build-identity.md) (build identity) and [ADR 0004](0004-traceability-conventions.md) (manifest/`build-info` entries) to container images
+- **Amended by [ADR 0013](0013-versioning-and-release-process.md)** (SCRUM-8): `VERSION` (default `0.0.0-SNAPSHOT`)
+  is the product/build version and also feeds `-Drevision` / `APP_VERSION` in the build stage; both Dockerfiles gain a
+  `prebuilt` mode (`JAR_SOURCE` / `DIST_SOURCE` + BuildKit named contexts) used by the `Release` workflow; label
+  `org.opencontainers.image.base.name` added; CI images also tagged with the build version. **Amended by
+  [ADR 0014](0014-vulnerability-scanning-policy.md)**: vulnerability scanning (SCRUM-7 Q-02) is done there.
 - Design: [SCRUM-7 design §3–§4](../architecture/SCRUM-7-design.md)
 
 ## Context
