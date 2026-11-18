@@ -13,7 +13,7 @@ const opts = { kind: 'frontend-app', version: '0.1.0-abc1234', sha: SHA, jira: '
 const prop = (doc, name) => doc.metadata.component.properties.find((p) => p.name === name)?.value
 
 test('SCRUM-8-AC-17: sets the root component name, version, VCS reference and commit/jira/version properties', () => {
-  const { doc, count } = finalizeSbom(npm(), opts)
+  const { doc, count } = finalizeSbom(npm(), { ...opts, minimum: 3 })
   assert.equal(doc.metadata.component.name, 'todo-frontend')
   assert.equal(doc.metadata.component.version, '0.1.0-abc1234')
   assert.equal(prop(doc, 'com.vinods21.todo:commit'), SHA)
@@ -34,7 +34,7 @@ test('SCRUM-8-AC-17: image SBOMs get the GHCR name and the digest property', () 
 })
 
 test('SCRUM-8-NFR-11: strips absolute runner and workspace paths', () => {
-  const { doc } = finalizeSbom(npm(), opts)
+  const { doc } = finalizeSbom(npm(), { ...opts, minimum: 3 })
   const text = JSON.stringify(doc)
   assert.doesNotMatch(text, /\/home\/runner/)
   assert.equal(prop(doc, 'cdx:npm:package:path'), 'frontend')
@@ -42,21 +42,23 @@ test('SCRUM-8-NFR-11: strips absolute runner and workspace paths', () => {
 })
 
 test('SCRUM-8-AC-17: below the minimum component count → throws (silently broken generator fails)', () => {
-  assert.throws(() => finalizeSbom(npm(), { ...opts, kind: 'backend-app' }), (e) => e instanceof SbomError && /minimum 40/.test(e.message))
+  assert.throws(() => finalizeSbom(npm(), { ...opts, kind: 'backend-app' }), (e) => e instanceof SbomError && /minimum 74/.test(e.message))
   const empty = { ...npm(), components: [] }
   assert.throws(() => finalizeSbom(empty, opts), SbomError)
+  const few = { ...npm(), components: npm().components.slice(0, 1) }
+  assert.throws(() => finalizeSbom(few, opts), (e) => /only 1 components \(minimum 7\)/.test(e.message))
 })
 
 test('SCRUM-8-AC-17: keeps serialNumber and specVersion; rejects non-CycloneDX input', () => {
-  const { doc } = finalizeSbom(npm(), opts)
+  const { doc } = finalizeSbom(npm(), { ...opts, minimum: 3 })
   assert.equal(doc.serialNumber, 'urn:uuid:00000000-0000-4000-8000-000000000001')
   assert.equal(doc.specVersion, '1.6')
   assert.throws(() => finalizeSbom({ spdxVersion: 'SPDX-2.3' }, opts), SbomError)
 })
 
 test('SCRUM-8-AC-17: idempotent — finalizing twice does not duplicate properties or references', () => {
-  const once = finalizeSbom(npm(), opts).doc
-  const twice = finalizeSbom(once, opts).doc
+  const once = finalizeSbom(npm(), { ...opts, minimum: 3 }).doc
+  const twice = finalizeSbom(once, { ...opts, minimum: 3 }).doc
   assert.deepEqual(twice.metadata.component, once.metadata.component)
 })
 

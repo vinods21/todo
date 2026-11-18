@@ -1,9 +1,11 @@
 // SCRUM-8-AC-17, NFR-11 (design §7.3): SBOM post-processing — root component, traceability properties, no runner paths.
+// Floors ≈ 80 % of the counts observed in the first dry-run (Release run 44362670868: 93 / 9 / 157 / 71, design §7.3);
+// a silently broken generator falls far below them. Raise them when the dependency set grows substantially.
 export const MIN_COMPONENTS = Object.freeze({
-  'backend-app': 40,
-  'frontend-app': 3,
-  'backend-image': 40,
-  'frontend-image': 15,
+  'backend-app': 74,
+  'frontend-app': 7,
+  'backend-image': 125,
+  'frontend-image': 56,
 })
 export const ROOT_NAMES = Object.freeze({
   'backend-app': 'todo-backend',
