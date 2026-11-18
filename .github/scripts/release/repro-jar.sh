@@ -8,7 +8,9 @@ staged="$1"
 summary="${GITHUB_STEP_SUMMARY:-/dev/null}"
 rebuilt="target/todo-backend-${VERSION}.jar"
 result="no"
-if ./mvnw -o -B -ntp -q clean package -Dmaven.test.skip=true -Djacoco.skip=true \
+# `rm -rf target` instead of `clean`: maven-clean-plugin is not in the local repository after `verify` (offline).
+rm -rf target
+if ./mvnw -o -B -ntp -q package -Dmaven.test.skip=true -Djacoco.skip=true \
      "-Drevision=${VERSION}" "-Djira.issue=${JIRA_KEY}" "-Dproject.build.outputTimestamp=${COMMIT_EPOCH}"; then
   a=$(sha256sum "$staged" | cut -d' ' -f1)
   b=$(sha256sum "$rebuilt" | cut -d' ' -f1)

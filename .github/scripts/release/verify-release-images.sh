@@ -49,11 +49,23 @@ for svc in backend frontend; do
     mkdir -p "$work/dist" "$work/html"
     tar -xzf "$in_frontend/todo-frontend-${VERSION}.tar.gz" -C "$work/dist"
     docker cp "$cid:/usr/share/nginx/html/." "$work/html" >/dev/null
-    if diff -r "$work/dist" "$work/html" >/dev/null; then
-      payload="html/ = tested bundle"
+    # Every file of the tested bundle must be in the image byte-for-byte; the base image's own files (50x.html) may
+    # remain next to them (as in the source-mode image, SCRUM-7).
+    files=0
+    mismatched=0
+    while IFS= read -r -d '' f; do
+      rel="${f#"$work/dist/"}"
+      files=$((files + 1))
+      if ! cmp -s "$f" "$work/html/$rel"; then
+        mismatched=$((mismatched + 1))
+        echo "differs or missing in image: $rel"
+      fi
+    done < <(find "$work/dist" -type f -print0)
+    extras=$(cd "$work/html" && find . -type f | sed 's|^\./||' | while read -r x; do [ -e "$work/dist/$x" ] || echo "$x"; done | tr '\n' ' ')
+    if [ "$mismatched" -eq 0 ] && [ "$files" -gt 0 ]; then
+      payload="html/ ⊇ tested bundle ($files files identical; base-image extras: ${extras:-none})"
     else
-      fail "frontend: /usr/share/nginx/html differs from the tested bundle (AC-25)"
-      diff -rq "$work/dist" "$work/html" | head -n 20 || true
+      fail "frontend: $mismatched of $files bundle files differ or are missing in /usr/share/nginx/html (AC-25)"
       result=FAIL
       payload="differs"
     fi
