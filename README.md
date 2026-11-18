@@ -27,6 +27,12 @@ To-Do application (epic SCRUM-5):
   [`docs/architecture/SCRUM-7-design.md`](docs/architecture/SCRUM-7-design.md) · Matrix:
   [`docs/traceability/SCRUM-7.md`](docs/traceability/SCRUM-7.md)
 
+- **SCRUM-8 — versioning and releases:** one SemVer product version from Git tags, build versions in CI, the
+  `Release` workflow (dry-run on every PR/push), SBOMs, vulnerability gate, GHCR images — see [Releases](#releases).
+  Requirements: [`docs/requirements/SCRUM-8.md`](docs/requirements/SCRUM-8.md) · Design:
+  [`docs/architecture/SCRUM-8-design.md`](docs/architecture/SCRUM-8-design.md) · Matrix:
+  [`docs/traceability/SCRUM-8.md`](docs/traceability/SCRUM-8.md)
+
 Architecture decisions for all parts are in [`docs/adr/`](docs/adr).
 
 ## Run with Docker Compose (SCRUM-7)
@@ -77,6 +83,9 @@ secrets** — do not reuse them anywhere else.
 | `TODO_FRONTEND_PORT` | `3000` | host port of the frontend (the app) |
 | `TODO_CORS_ALLOWED_ORIGINS` | `http://localhost:5173` | backend `APP_CORS_ALLOWED_ORIGINS` (the Vite dev server, see below) |
 | `TODO_IMAGE_TAG` | `local` | tag of the images `todo-backend` / `todo-frontend` (CI: `<JIRA_KEY>-<sha>`) |
+| `TODO_BACKEND_IMAGE`, `TODO_FRONTEND_IMAGE` | `todo-backend`, `todo-frontend` | image repositories — set to `ghcr.io/vinods21/todo-*` to run a published release ([Releases](#releases)) |
+| `TODO_BACKEND_TAG`, `TODO_FRONTEND_TAG` | `TODO_IMAGE_TAG` | per-service tag, e.g. `0.1.0@sha256:<digest>` to pin a release by digest |
+| `TODO_VERSION` | `0.0.0-SNAPSHOT` | version stamped into locally built images (releases come from Git tags, SCRUM-8) |
 | `JIRA_KEY`, `GIT_COMMIT`, `GIT_BRANCH` | `UNKNOWN` | build identity baked into the images (labels, jar, `/actuator/info`, UI footer) |
 | `COMPOSE_PROFILES` | — | `app` makes a plain `docker compose up -d` start the whole stack |
 
@@ -121,6 +130,45 @@ backend allows by default (SCRUM-7-AC-12).
 - *The UI shows a network/server error*: the backend is down or restarting; nginx answers `502` until it is healthy
   again.
 
+## Releases
+
+Released versions are on the [GitHub Releases page](https://github.com/vinods21/todo/releases) (jar, frontend
+bundle, four CycloneDX SBOMs, scan reports, `SHA256SUMS`, provenance attestations) and in GHCR as
+`ghcr.io/vinods21/todo-backend` and `ghcr.io/vinods21/todo-frontend` (linux/amd64). The first release is `v0.1.0`,
+cut after the SCRUM-8 merge.
+
+**Version scheme** (SCRUM-8, [ADR 0013](docs/adr/0013-versioning-and-release-process.md)): one SemVer version
+`MAJOR.MINOR.PATCH` for backend and frontend; the Git tag `vX.Y.Z` is the only source of truth and is created by the
+`Release` workflow — `pom.xml` (`${revision}`) and `frontend/package.json` hold the placeholder `0.0.0-SNAPSHOT` and
+are never edited for a release. Every other build gets a **build version** `X.Y.Z-<sha7>` (next patch after the
+latest release, `0.1.0-<sha7>` before the first; `g<sha7>` if the SHA is all digits with a leading zero). Image tags
+`X.Y.Z` and `X.Y.Z-<sha7>` are immutable; `X.Y` and `latest` move. Local builds say `0.0.0-SNAPSHOT`.
+
+**Run a released version with Compose** (no build, no source needed beyond `docker-compose.yml`):
+
+```bash
+export TODO_BACKEND_IMAGE=ghcr.io/vinods21/todo-backend TODO_FRONTEND_IMAGE=ghcr.io/vinods21/todo-frontend
+export TODO_IMAGE_TAG=0.1.0        # or pin by digest: TODO_BACKEND_TAG=0.1.0@sha256:… TODO_FRONTEND_TAG=0.1.0@sha256:…
+docker compose --profile app pull backend frontend
+docker compose --profile app up --no-build -d --wait
+curl -s localhost:8080/actuator/info | jq -r .build.version    # → 0.1.0
+```
+
+The default local workflow (`docker compose --profile app up --build`) is unchanged.
+
+**Runbooks:** [RELEASE.md](docs/release/RELEASE.md) (versioning rules, cutting a release, dry-run, what is produced,
+verification, failure recovery, first release) · [ROLLBACK.md](docs/release/ROLLBACK.md) (redeploy a previous
+version by digest, Flyway caveat, roll forward) · [vulnerability-policy.md](docs/release/vulnerability-policy.md)
+(what blocks a release, allow-list). Cut a release:
+`gh workflow run release.yml --ref main -f bump=patch -f dry_run=false`.
+
+**Release tooling** (`.github/scripts/release/`, Node ≥ 20, no dependencies) — run its tests and lint locally:
+
+```bash
+node --test ".github/scripts/release/test/*.test.mjs"
+.github/scripts/release/install-tools.sh shellcheck && .tools/bin/shellcheck .github/scripts/*.sh .github/scripts/release/*.sh
+```
+
 ## Run locally (SCRUM-2-NFR-08)
 
 Prerequisites: JDK 21, and Docker (for the local database and the integration tests). Maven is not needed;
@@ -143,7 +191,7 @@ the committed Maven Wrapper (`./mvnw`, `mvnw.cmd`) downloads Maven 3.9.11 on fir
 
    ```bash
    ./mvnw -DskipTests package
-   java -jar target/todo-backend-0.1.0-SNAPSHOT.jar
+   java -jar target/todo-backend-0.0.0-SNAPSHOT.jar   # placeholder version for local builds (SCRUM-8)
    ```
 
 3. Check it is up: `curl http://localhost:8080/actuator/health` returns `{"status":"UP"}`.
@@ -169,7 +217,7 @@ Stop the database with `docker compose down` (add `-v` to delete its data volume
 | `SERVER_PORT` | `8080` | HTTP port |
 | `APP_CORS_ALLOWED_ORIGINS` | `http://localhost:5173` | Comma-separated list of origins allowed to call `/api/**` (CORS) |
 
-Example: `DB_URL=jdbc:postgresql://db:5432/todo DB_PASSWORD=... APP_CORS_ALLOWED_ORIGINS=http://localhost:3000 java -jar target/todo-backend-0.1.0-SNAPSHOT.jar`
+Example: `DB_URL=jdbc:postgresql://db:5432/todo DB_PASSWORD=... APP_CORS_ALLOWED_ORIGINS=http://localhost:3000 java -jar target/todo-backend-0.0.0-SNAPSHOT.jar`
 
 ## API
 
@@ -281,7 +329,11 @@ Select one story's or one AC's tests in each layer: `./mvnw test -Dgroups=SCRUM-
 with `docker compose up --wait`, checks image labels, non-root users, runtime contents and sizes, runs the compose and
 dev-mode suites and a lifecycle/persistence script (clean `SIGTERM` stop, data kept across restarts, removed by
 `down -v`), writes a summary to the run page and uploads `todo-e2e-<key>-<sha>-reports` (Playwright HTML/JUnit/JSON,
-traces/screenshots/videos on failure, `docker compose logs`).
+traces/screenshots/videos on failure, `docker compose logs`). Since SCRUM-8 every job stamps and checks the build
+version `X.Y.Z-<sha7>` from `identity`. The separate workflow **`Release`** (`.github/workflows/release.yml`) runs in
+parallel as a dry run: release tooling tests + shellcheck, `./mvnw verify` and the frontend gate again on the exact
+commit, images built once from the tested artefacts, SBOMs, Trivy scans and the vulnerability gate
+([Releases](#releases)).
 
 ## Traceability
 
@@ -299,15 +351,25 @@ Every artefact traces back to its Jira story and acceptance criteria (ADR
   (`feature/SCRUM-<n>-…` → `SCRUM-<n>`, `main` → `main`, anything else → `NONE`) and passes it to Maven
   (`-Djira.issue=…`) and Vite (`JIRA_KEY`). Local builds say `UNKNOWN` unless you pass it yourself:
   `./mvnw verify -Djira.issue=SCRUM-6`, `JIRA_KEY=SCRUM-6 npm run build`.
+- **Version (SCRUM-8, ADR 0013):** CI's `identity` job also computes the build version `X.Y.Z-<sha7>` from the Git
+  tags and passes it to Maven (`-Drevision=…`), Vite (`APP_VERSION`) and both images (`VERSION`); a release stamps
+  `X.Y.Z`; local builds say `0.0.0-SNAPSHOT`. One version per build appears in the jar name
+  (`todo-backend-<version>.jar`), manifest `Implementation-Version`, `build-info` `build.version` (→ `/actuator/info`),
+  `dist/build-info.json` `version`, the `<meta name="build-info">` tag and both images' `org.opencontainers.image.version`.
 - **Jar:** the manifest carries `X-Jira-Issue`, `X-Git-Commit`, `X-Git-Branch` and `Implementation-Version`
-  (`unzip -p target/todo-backend-0.1.0-SNAPSHOT.jar META-INF/MANIFEST.MF`); `build.jira` is in
-  `META-INF/build-info.properties` at the jar root (Spring Boot 4 — not under `BOOT-INF/classes/`).
-- **Runtime:** `GET /actuator/info` returns the git commit/branch and `build.jira` (the build's Jira key).
+  (`unzip -p target/todo-backend-0.0.0-SNAPSHOT.jar META-INF/MANIFEST.MF` locally); `build.jira` and `build.version`
+  are in `META-INF/build-info.properties` at the jar root (Spring Boot 4 — not under `BOOT-INF/classes/`).
+- **Runtime:** `GET /actuator/info` returns the git commit/branch, `build.version` and `build.jira` (the build's
+  Jira key).
 - **CI:** GitHub Actions workflow `CI` (`.github/workflows/ci.yml`): job `identity` derives the key (shown in the
   run summary), job `build` publishes the jar as artifact `todo-backend-<key>-<commit sha>` and test + coverage
-  reports as `todo-backend-<key>-<commit sha>-reports`, after checking that the key is in the jar; job `e2e`
-  (SCRUM-7) tags the images `todo-backend:<key>-<sha>` / `todo-frontend:<key>-<sha>` and uploads
+  reports as `todo-backend-<key>-<commit sha>-reports`, after checking key, version and commit in the jar
+  (`verify-jar.sh`); job `e2e` (SCRUM-7) tags the images `todo-backend:<key>-<sha>` / `todo-frontend:<key>-<sha>`
+  and additionally with the build version (`todo-backend:<build version>`), asserts the version label and uploads
   `todo-e2e-<key>-<commit sha>-reports`.
+- **Release workflow (SCRUM-8):** `.github/workflows/release.yml` runs as a dry run on every PR and push and uploads
+  `todo-release-candidate-<key>-<sha>` (would-be release assets, SBOMs, scan reports, `SHA256SUMS`, notes) plus
+  `todo-release-{backend,frontend,images,sbom,scan}-<key>-<sha>` and `todo-release-tooling-<key>-<sha>-reports`.
 - **Matrices:** [`docs/traceability/`](docs/traceability) maps each story's AC/NFR to code, tests and CI evidence.
 
 ## Frontend (SCRUM-1)
@@ -381,9 +443,11 @@ or one story's with `npx vitest run -t 'SCRUM-6-'`.
 - **Tests:** each test file has one top-level `describe('SCRUM-<n> <area>')` per story; every test name starts with
   the AC/NFR ID(s) it verifies. After `npm run test:coverage`,
   `grep -oE 'SCRUM-[0-9]+-AC-[0-9]+' reports/junit.xml | sort -uV` lists the covered ACs.
-- **Build (ADR 0008):** `dist/build-info.json` holds `{ jira, commit, branch, builtAt }`, `dist/index.html` carries
-  `<meta name="build-info" content="<key> <commit>">`, and the app footer shows `<key> · <short commit>`, where
-  `<key>` is `JIRA_KEY` (derived from the branch in CI, `UNKNOWN` locally).
+- **Build (ADR 0008, SCRUM-8):** `dist/build-info.json` holds `{ jira, commit, branch, version, builtAt }`,
+  `dist/index.html` carries `<meta name="build-info" content="<key> <commit> <version>">`, and the app footer shows
+  `<key> · <short commit>`, where `<key>` is `JIRA_KEY` (derived from the branch in CI, `UNKNOWN` locally) and
+  `<version>` is `APP_VERSION` (CI build version or release, `0.0.0-SNAPSHOT` locally); `builtAt` follows
+  `SOURCE_DATE_EPOCH` when set (reproducible release bundles). `package.json` `version` is a placeholder.
 - **CI:** job `frontend` in `.github/workflows/ci.yml` (lint, typecheck, tests + coverage gate, build, build-identity
   check) uploads `todo-frontend-<key>-<commit sha>` (dist) and `todo-frontend-<key>-<commit sha>-reports` (junit +
   coverage).
