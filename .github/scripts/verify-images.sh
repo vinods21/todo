@@ -1,7 +1,9 @@
 #!/usr/bin/env bash
 # SCRUM-7-AC-22 (design §9.2): image labels, non-root users, runtime contents, no secrets in history, sizes.
+# SCRUM-8-AC-04, AC-14: if EXPECTED_VERSION is set, both version labels must equal it (one product version per run);
+# org.opencontainers.image.base.name must be set.
 # Usage: verify-images.sh <backend-image> <frontend-image>
-# Env: GIT_COMMIT, JIRA_KEY, GITHUB_STEP_SUMMARY (optional); docker compose env (COMPOSE_*) for the running stack.
+# Env: GIT_COMMIT, JIRA_KEY, EXPECTED_VERSION (optional), GITHUB_STEP_SUMMARY (optional); docker compose env (COMPOSE_*).
 set -euo pipefail
 
 backend="$1"
@@ -39,6 +41,12 @@ for svc in backend frontend; do
     v=$(label "$img" "org.opencontainers.image.$l")
     [ "$v" != "UNKNOWN" ] || { fail "$svc: label org.opencontainers.image.$l is UNKNOWN"; result="FAIL"; }
   done
+  version=$(label "$img" org.opencontainers.image.version)
+  if [ -n "${EXPECTED_VERSION:-}" ] && [ "$version" != "$EXPECTED_VERSION" ]; then
+    fail "$svc: org.opencontainers.image.version='$version', expected '$EXPECTED_VERSION' (SCRUM-8-AC-04)"; result="FAIL"
+  fi
+  base=$(label "$img" org.opencontainers.image.base.name)
+  [ -n "$base" ] && [ "$base" != "<no value>" ] || { fail "$svc: label org.opencontainers.image.base.name is empty (SCRUM-8-AC-14)"; result="FAIL"; }
 
   # 2. NFR-01: non-root image user and running process.
   user=$(docker image inspect -f '{{ .Config.User }}' "$img")
@@ -78,14 +86,14 @@ for svc in backend frontend; do
     size_note="$mb MB (over target)"
   fi
 
-  rows+=("| $svc | \`$img\` | \`${revision:0:12}\` | \`$jira\` | \`$user\` | $runtime_uid | $size_note | <= $target MB | $result |")
+  rows+=("| $svc | \`$img\` | \`$version\` | \`${revision:0:12}\` | \`$jira\` | \`$user\` | $runtime_uid | $size_note | <= $target MB | $result |")
 done
 
 {
-  echo "### Images (SCRUM-7-AC-22, NFR-01..NFR-06)"
+  echo "### Images (SCRUM-7-AC-22, NFR-01..NFR-06; SCRUM-8-AC-04, AC-14)"
   echo
-  echo "| image | tag | revision | jira | user | runtime UID | size | target | result |"
-  echo "|---|---|---|---|---|---|---|---|---|"
+  echo "| image | tag | version | revision | jira | user | runtime UID | size | target | result |"
+  echo "|---|---|---|---|---|---|---|---|---|---|"
   printf '%s\n' "${rows[@]}"
   echo
   echo "Sizes: \`docker image inspect .Size\` (uncompressed)."

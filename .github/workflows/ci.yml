@@ -2,6 +2,9 @@
 # `identity`, and injected into the backend (`build`, SCRUM-2-NFR-06) and `frontend` (SCRUM-1-NFR-06) jobs, and
 # into job `e2e` (SCRUM-7-AC-20, ADR 0010-0012: container images, Compose stack, Playwright e2e).
 # feature/SCRUM-<n>-<slug> -> SCRUM-<n>; main -> main; anything else -> NONE (local builds: UNKNOWN).
+# SCRUM-8 (ADR 0013): `identity` also computes the build version X.Y.Z-<sha7> from the Git tags (next patch after the
+# latest vX.Y.Z, 0.1.0 before the first release); it is stamped into the jar, build-info.json and both images and
+# asserted in each job (SCRUM-8-AC-03, AC-04). Releases themselves are cut by workflow `Release` (release.yml).
 name: CI
 
 on:
@@ -19,29 +22,29 @@ jobs:
     runs-on: ubuntu-latest
     outputs:
       jira_key: ${{ steps.derive.outputs.jira_key }}
+      build_version: ${{ steps.derive.outputs.build_version }}
     steps:
-      - name: Derive Jira key from branch
+      # SCRUM-8-AC-05: tags are the source of truth for versions → full history + tags (new step: SHA-pinned, NFR-02).
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+          fetch-tags: true
+          persist-credentials: false
+
+      - name: Derive Jira key and build version (ADR 0008, SCRUM-8-AC-03)
         id: derive
         env:
           # Untrusted input (fork PR branch names): passed via env, never interpolated into the script.
           BRANCH: ${{ github.head_ref || github.ref_name }}
-        run: |
-          re='^feature/(SCRUM-[0-9]+)(-|$)'
-          if [[ "$BRANCH" =~ $re ]]; then
-            key="${BASH_REMATCH[1]}"
-          elif [[ "$BRANCH" == "main" ]]; then
-            key="main"
-          else
-            key="NONE"
-          fi
-          echo "jira_key=$key" >> "$GITHUB_OUTPUT"
-          echo "### Build identity: \`$key\` (commit \`${GITHUB_SHA::7}\`)" >> "$GITHUB_STEP_SUMMARY"
+          SHA: ${{ github.sha }}
+        run: node .github/scripts/release/version.mjs identity --github-output "$GITHUB_OUTPUT" --summary "$GITHUB_STEP_SUMMARY"
 
   build:
     needs: identity
     runs-on: ubuntu-latest
     env:
       JIRA_KEY: ${{ needs.identity.outputs.jira_key }}
+      BUILD_VERSION: ${{ needs.identity.outputs.build_version }} # SCRUM-8-AC-03
     steps:
       - uses: actions/checkout@v4
         with:
@@ -54,19 +57,10 @@ jobs:
           cache: maven
 
       - name: Build, test, coverage gate
-        run: ./mvnw -B -ntp verify "-Djira.issue=${JIRA_KEY}"
+        run: ./mvnw -B -ntp verify "-Djira.issue=${JIRA_KEY}" "-Drevision=${BUILD_VERSION}"
 
-      - name: Verify build identity
-        run: |
-          jar=$(ls target/todo-backend-*.jar) # the .jar.original from repackaging does not match this glob
-          # grep without -q: an early grep exit could SIGPIPE unzip and fail the step under pipefail.
-          unzip -p "$jar" META-INF/MANIFEST.MF | tr -d '\r' | grep -x "X-Jira-Issue: ${JIRA_KEY}" >/dev/null
-          # Locate build-info.properties instead of assuming its path inside the Boot jar.
-          info=$(unzip -Z1 "$jar" | grep -E '(^|/)META-INF/build-info\.properties$' | head -n1 || true)
-          if [ -z "$info" ]; then echo "build-info.properties not found in $jar"; unzip -Z1 "$jar" | grep -i 'build-info' || true; exit 1; fi
-          echo "build-info found at: $info"
-          unzip -p "$jar" "$info" | tr -d '\r' | grep -x "build.jira=${JIRA_KEY}" >/dev/null
-          echo "Backend jar $jar carries X-Jira-Issue and build.jira = ${JIRA_KEY}"
+      - name: Verify build identity (ADR 0008, SCRUM-8-AC-04)
+        run: .github/scripts/verify-jar.sh "target/todo-backend-${BUILD_VERSION}.jar" "$BUILD_VERSION" "$JIRA_KEY" "$GITHUB_SHA"
 
       - name: Coverage summary
         if: always()
@@ -106,6 +100,7 @@ jobs:
     runs-on: ubuntu-latest
     env:
       JIRA_KEY: ${{ needs.identity.outputs.jira_key }} # read by vite.config.ts (tests and build)
+      APP_VERSION: ${{ needs.identity.outputs.build_version }} # read by vite.config.ts (SCRUM-8-AC-04)
     defaults:
       run:
         working-directory: frontend
@@ -134,11 +129,20 @@ jobs:
         run: npm run test:coverage
 
       - name: Build
-        run: npm run build # JIRA_KEY / GITHUB_SHA / GITHUB_REF_NAME / GITHUB_HEAD_REF feed build-info (SCRUM-1-NFR-09)
+        run: npm run build # JIRA_KEY / GITHUB_SHA / GITHUB_REF_NAME / GITHUB_HEAD_REF / APP_VERSION feed build-info (SCRUM-1-NFR-09)
 
-      - name: Verify build identity
+      - name: Verify build identity (SCRUM-8-AC-04)
         run: |
-          node -e 'const b = require("./dist/build-info.json"); if (b.jira !== process.env.JIRA_KEY) { console.error("build-info.json jira mismatch", b); process.exit(1) } console.log(`dist/build-info.json jira = ${b.jira}`)'
+          node -e '
+            const e = process.env
+            const b = require("./dist/build-info.json")
+            const meta = `<meta name="build-info" content="${e.JIRA_KEY} ${e.GITHUB_SHA} ${e.APP_VERSION}">`
+            const html = require("fs").readFileSync("dist/index.html", "utf8")
+            if (b.jira !== e.JIRA_KEY || b.version !== e.APP_VERSION || !html.includes(meta)) {
+              console.error("::error::build identity mismatch", b, "expected meta", meta)
+              process.exit(1)
+            }
+            console.log(`dist/build-info.json jira = ${b.jira}, version = ${b.version}; meta tag ok`)'
 
       - name: Test & coverage summary
         if: always()
@@ -176,6 +180,7 @@ jobs:
     timeout-minutes: 20
     env:
       JIRA_KEY: ${{ needs.identity.outputs.jira_key }}
+      BUILD_VERSION: ${{ needs.identity.outputs.build_version }} # SCRUM-8-AC-03, AC-15: additional image tag + label
       GIT_COMMIT: ${{ github.sha }}
       GIT_BRANCH: ${{ github.head_ref || github.ref_name }} # untrusted (fork PRs): env / action inputs only, always quoted
       TODO_IMAGE_TAG: ${{ needs.identity.outputs.jira_key }}-${{ github.sha }}
@@ -199,8 +204,6 @@ jobs:
         id: meta
         run: |
           echo "build_date=$(date -u +%Y-%m-%dT%H:%M:%SZ)" >> "$GITHUB_OUTPUT"
-          echo "backend_version=$(python3 -c 'import xml.etree.ElementTree as E; print(E.parse("pom.xml").getroot().findtext("{http://maven.apache.org/POM/4.0.0}version"))')" >> "$GITHUB_OUTPUT"
-          echo "frontend_version=$(node -p 'require("./frontend/package.json").version')" >> "$GITHUB_OUTPUT"
 
       - uses: docker/setup-buildx-action@v3
 
@@ -213,12 +216,14 @@ jobs:
           push: false
           provenance: false
           sbom: false
-          tags: todo-backend:${{ env.TODO_IMAGE_TAG }}
+          tags: |
+            todo-backend:${{ env.TODO_IMAGE_TAG }}
+            todo-backend:${{ env.BUILD_VERSION }}
           build-args: |
             JIRA_KEY=${{ env.JIRA_KEY }}
             GIT_COMMIT=${{ github.sha }}
             GIT_BRANCH=${{ env.GIT_BRANCH }}
-            VERSION=${{ steps.meta.outputs.backend_version }}
+            VERSION=${{ env.BUILD_VERSION }}
             BUILD_DATE=${{ steps.meta.outputs.build_date }}
           cache-from: type=gha,scope=todo-backend
           cache-to: type=gha,scope=todo-backend,mode=max
@@ -232,12 +237,14 @@ jobs:
           push: false
           provenance: false
           sbom: false
-          tags: todo-frontend:${{ env.TODO_IMAGE_TAG }}
+          tags: |
+            todo-frontend:${{ env.TODO_IMAGE_TAG }}
+            todo-frontend:${{ env.BUILD_VERSION }}
           build-args: |
             JIRA_KEY=${{ env.JIRA_KEY }}
             GIT_COMMIT=${{ github.sha }}
             GIT_BRANCH=${{ env.GIT_BRANCH }}
-            VERSION=${{ steps.meta.outputs.frontend_version }}
+            VERSION=${{ env.BUILD_VERSION }}
             BUILD_DATE=${{ steps.meta.outputs.build_date }}
           cache-from: type=gha,scope=todo-frontend
           cache-to: type=gha,scope=todo-frontend,mode=max
@@ -246,8 +253,10 @@ jobs:
         id: stack
         run: docker compose up -d --no-build --wait --wait-timeout 240
 
-      - name: Verify images and containers (SCRUM-7-AC-22, NFR-01, NFR-02, NFR-03, NFR-05, NFR-06)
+      - name: Verify images and containers (SCRUM-7-AC-22, NFR-01..NFR-06; SCRUM-8-AC-04, AC-14)
         if: ${{ !cancelled() && steps.stack.outcome == 'success' }}
+        env:
+          EXPECTED_VERSION: ${{ env.BUILD_VERSION }}
         run: .github/scripts/verify-images.sh "todo-backend:${TODO_IMAGE_TAG}" "todo-frontend:${TODO_IMAGE_TAG}"
 
       - name: Install e2e dependencies
@@ -288,6 +297,7 @@ jobs:
           E2E_EXPECT_EMPTY_DB: "1"
           E2E_JIRA_KEY: ${{ env.JIRA_KEY }}
           E2E_GIT_SHA: ${{ github.sha }}
+          E2E_VERSION: ${{ env.BUILD_VERSION }} # SCRUM-8-AC-04
         run: npx playwright test
 
       - name: Install frontend dependencies (dev mode)
