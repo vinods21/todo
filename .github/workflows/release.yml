@@ -484,10 +484,12 @@ jobs:
       - name: Image SBOMs from the OCI archives (SCRUM-8-AC-17)
         run: |
           mkdir -p sbom
-          trivy image --input images/todo-backend.oci.tar --format cyclonedx --cache-dir ~/.cache/trivy --quiet \
-            --output "sbom/todo-backend-image-${VERSION}.cdx.json"
-          trivy image --input images/todo-frontend.oci.tar --format cyclonedx --cache-dir ~/.cache/trivy --quiet \
-            --output "sbom/todo-frontend-image-${VERSION}.cdx.json"
+          # Trivy --input takes an OCI layout directory, not an OCI archive tar: unpack the archives (same bytes).
+          for img in todo-backend todo-frontend; do
+            mkdir -p "oci/$img" && tar -xf "images/$img.oci.tar" -C "oci/$img"
+            trivy image --input "oci/$img" --format cyclonedx --cache-dir ~/.cache/trivy --quiet \
+              --output "sbom/$img-image-${VERSION}.cdx.json"
+          done
           cp "in/backend/todo-backend-${VERSION}.cdx.json" "in/frontend/todo-frontend-${VERSION}.cdx.json" sbom/
 
       - name: Finalize SBOMs — root component, commit, version; no runner paths (SCRUM-8-AC-17, NFR-11)

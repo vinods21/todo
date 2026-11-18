@@ -20,10 +20,16 @@ scan() { # <target> <trivy args...>
   echo "::endgroup::"
 }
 
+# Trivy's --input reads a docker-save tar or an OCI layout directory, not an OCI archive tar (Release run 44361893163):
+# unpack the archives — the very bytes that are pushed — into layout directories.
+for img in todo-backend todo-frontend; do
+  rm -rf "oci/$img" && mkdir -p "oci/$img" && tar -xf "images/$img.oci.tar" -C "oci/$img"
+done
+
 scan backend-runtime sbom "in/backend/todo-backend-${v}.cdx.json"
 scan backend-all-scopes sbom "in/backend/todo-backend-all-scopes-${v}.cdx.json"
 scan frontend-prod sbom "in/frontend/todo-frontend-${v}.cdx.json"
 scan frontend-all fs --scanners vuln --include-dev-deps frontend/package-lock.json
-scan backend-image image --input images/todo-backend.oci.tar --scanners vuln,secret
-scan frontend-image image --input images/todo-frontend.oci.tar --scanners vuln,secret
+scan backend-image image --input oci/todo-backend --scanners vuln,secret
+scan frontend-image image --input oci/todo-frontend --scanners vuln,secret
 ls -l scan
