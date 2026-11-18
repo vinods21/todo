@@ -17,6 +17,18 @@ fail() {
 label() {
   docker image inspect -f "{{ index .Config.Labels \"$2\" }}" "$1"
 }
+# base.name is a literal in each Dockerfile (AC-14): it must name the runtime (last) FROM, fully qualified.
+root="$(cd "$(dirname "$0")/../../.." && pwd)"
+runtime_base() { # <Dockerfile> → docker.io/<ns>/<repo>:<tag> of the last FROM
+  local ref
+  ref=$(awk 'toupper($1) == "FROM" { r = $2 } END { print r }' "$1")
+  case "$ref" in
+    */*) [[ "${ref%%/*}" == *[.:]* || "${ref%%/*}" == localhost ]] || ref="docker.io/$ref" ;;
+    *) ref="docker.io/library/$ref" ;;
+  esac
+  echo "$ref"
+}
+declare -A dockerfile=([backend]="$root/Dockerfile" [frontend]="$root/frontend/Dockerfile")
 work=$(mktemp -d)
 trap 'rm -rf "$work"' EXIT
 rows=()
@@ -35,6 +47,9 @@ for svc in backend frontend; do
     got=$(label "$img" "$k")
     if [ -z "$got" ] || [ "$got" = "<no value>" ] || [ "$got" = UNKNOWN ]; then fail "$svc: label $k is empty/UNKNOWN"; result=FAIL; fi
   done
+  want_base=$(runtime_base "${dockerfile[$svc]}")
+  got_base=$(label "$img" org.opencontainers.image.base.name)
+  [ "$got_base" = "$want_base" ] || { fail "$svc: label org.opencontainers.image.base.name='$got_base', runtime FROM is '$want_base' (SCRUM-8-AC-14)"; result=FAIL; }
   user=$(docker image inspect -f '{{ .Config.User }}' "$img")
   [[ "${user%%:*}" =~ ^[1-9][0-9]*$ ]] || { fail "$svc: image user '$user' is not a non-root UID"; result=FAIL; }
 

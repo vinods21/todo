@@ -73,10 +73,14 @@ Docker can run the stack. Constraints:
   ecosystem) rot silently; follow-up story together with Q-01/Q-02.
 - Bumping a base image is a deliberate change to the Dockerfile and this table.
 - **SCRUM-8 (2026-11-18):** frontend runtime moved from `nginxinc/nginx-unprivileged:1.30.6-alpine3.24` to
-  `nginx/nginx-unprivileged:1.30.6-alpine3.24` — same nginx version and Alpine line, the repository upstream publishes
-  to since 2026-10-20 (`nginxinc/` is no longer rebuilt; its Alpine packages had fixable CRITICAL/HIGH CVEs found by
-  the new release gate, ADR 0014, Release run 44362670868; upstream rebuilds `nginx/` weekly). Keep
-  `org.opencontainers.image.base.name` in the Dockerfile in sync with every bump.
+  `nginx/nginx-unprivileged:1.30.6-alpine3.24` — same nginx version and Alpine line, the Docker Hub repository
+  upstream (GitHub `nginx/docker-nginx-unprivileged`, formerly `nginxinc/`) publishes to since stable 1.30.6 /
+  mainline 1.31.7 (upstream commits `5ac28c4` "CI: log in to Docker Hub via OIDC connection … pushed to
+  hub.docker.com/r/nginx/nginx-unprivileged" and `c6a0f96` README, 2026-10-13; Docker Hub credentials for
+  `nginxinc/` removed in `679834d`, 2026-10-22). `nginxinc/` is no longer rebuilt; its Alpine packages had fixable
+  CRITICAL/HIGH CVEs found by the new release gate (ADR 0014, Release run 44362670868). Keep
+  `org.opencontainers.image.base.name` in the Dockerfile in sync with every bump (asserted by
+  `verify-release-images.sh`).
 
 ### Image structure
 

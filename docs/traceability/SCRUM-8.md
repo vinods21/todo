@@ -90,7 +90,7 @@ Dependency/base-image changes made to pass the gate (design R5, step 1 — base 
 
 | Change | Commit | Findings cleared (all `frontend-image`, Alpine packages; fixed versions per Trivy) |
 |---|---|---|
-| `nginxinc/nginx-unprivileged:1.30.6-alpine3.24` → `nginx/nginx-unprivileged:1.30.6-alpine3.24` (same version; upstream publishes to `nginx/` since 2026-10-20, `nginxinc/` no longer rebuilt) | 2223cb7 (a first attempt with `1.30.7-alpine3.24`, 28b3bc8, failed: tag not yet published) | CRITICAL CVE-2026-111497 (brotli-libs); HIGH CVE-2026-107891 (musl, musl-utils), CVE-2026-113351, CVE-2026-115506, CVE-2026-117610, CVE-2026-118370 (libexpat), CVE-2026-125350, CVE-2026-87636, CVE-2026-9947 (libxslt), CVE-2026-85091 (zlib), CVE-2026-92392 (curl, libcurl) |
+| `nginxinc/nginx-unprivileged:1.30.6-alpine3.24` → `nginx/nginx-unprivileged:1.30.6-alpine3.24` (same version; upstream `nginx/docker-nginx-unprivileged` publishes to Docker Hub `nginx/` from stable 1.30.6 on — commits `5ac28c4`/`c6a0f96`, 2026-10-13 — and no longer rebuilds `nginxinc/`) | 2223cb7 (a first attempt with `1.30.7-alpine3.24`, 28b3bc8, failed: tag not yet published) | CRITICAL CVE-2026-111497 (brotli-libs); HIGH CVE-2026-107891 (musl, musl-utils), CVE-2026-113351, CVE-2026-115506, CVE-2026-117610, CVE-2026-118370 (libexpat), CVE-2026-125350, CVE-2026-87636, CVE-2026-9947 (libxslt), CVE-2026-85091 (zlib), CVE-2026-92392 (curl, libcurl) |
 
 No Spring Boot / Maven or npm bump was needed (backend-runtime and frontend-prod: 0 findings).
 

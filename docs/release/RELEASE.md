@@ -70,7 +70,9 @@ gh run watch --repo vinods21/todo "$(gh run list --repo vinods21/todo --workflow
 Guard rails (job `version`, refuses with `::error::` before any build): the ref must be `refs/heads/main` (any other
 ref → "re-run with dry_run=true"); the checked-out commit must equal the dispatched `github.sha` (all jobs check out
 that SHA, not a moving `main`); the commit must not already carry a release tag (no second version per commit).
-Only one release runs at a time (concurrency group `release-publish`, never cancelled). Who may dispatch is governed by
+Only one release runs at a time (concurrency group `release-publish`; a running release is never cancelled, but
+GitHub keeps only the newest *pending* run per group — a second dispatch queued behind a running release replaces an
+older pending one, which is then cancelled before it builds or publishes anything). Who may dispatch is governed by
 repository write access; `publish` additionally runs in the GitHub Environment **`release`** whose deployment branch
 policy allows `main` only.
 
