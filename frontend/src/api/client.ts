@@ -19,8 +19,14 @@ export function isAbortError(error: unknown): boolean {
     : error instanceof Error && error.name === 'AbortError'
 }
 
-export function buildUrl(path: string, query?: Query): URL {
-  const url = new URL(API_BASE_URL + path)
+/**
+ * SCRUM-1-AC-13, SCRUM-7-AC-17 (ADR 0011).
+ * Absolute API_BASE_URL → used as is (the second URL argument is ignored for absolute inputs).
+ * '' (VITE_API_BASE_URL='/', same-origin) → resolved against the page origin: <origin>/api/….
+ * `baseUrl` is a parameter only so tests can exercise both modes without re-importing the module.
+ */
+export function buildUrl(path: string, query?: Query, baseUrl: string = API_BASE_URL): URL {
+  const url = new URL(baseUrl + path, window.location.origin)
   if (query) {
     for (const [key, value] of Object.entries(query)) {
       if (value !== undefined) url.searchParams.set(key, String(value))

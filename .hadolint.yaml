@@ -1,0 +1,3 @@
+# SCRUM-7-NFR-12 (ADR 0010): CI fails on warnings. Every ignored rule must carry a reason here.
+failure-threshold: warning
+ignored: []

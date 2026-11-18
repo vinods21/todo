@@ -1,0 +1,22 @@
+{
+  "name": "todo-e2e",
+  "version": "0.1.0",
+  "private": true,
+  "description": "End-to-end tests for the To-Do application (SCRUM-7, ADR 0012)",
+  "type": "module",
+  "engines": {
+    "node": ">=22.22.2 <23"
+  },
+  "scripts": {
+    "test": "playwright test",
+    "test:dev": "E2E_MODE=dev playwright test",
+    "list": "playwright test --list",
+    "typecheck": "tsc --noEmit",
+    "report": "playwright show-report reports/compose/html"
+  },
+  "devDependencies": {
+    "@playwright/test": "1.65.1",
+    "@types/node": "22.20.5",
+    "typescript": "6.0.3"
+  }
+}

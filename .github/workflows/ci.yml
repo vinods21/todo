@@ -1,5 +1,6 @@
 # ADR 0008: one workflow for every story. The build identity (Jira key) is derived from the branch once, in job
-# `identity`, and injected into the backend (`build`, SCRUM-2-NFR-06) and `frontend` (SCRUM-1-NFR-06) jobs.
+# `identity`, and injected into the backend (`build`, SCRUM-2-NFR-06) and `frontend` (SCRUM-1-NFR-06) jobs, and
+# into job `e2e` (SCRUM-7-AC-20, ADR 0010-0012: container images, Compose stack, Playwright e2e).
 # feature/SCRUM-<n>-<slug> -> SCRUM-<n>; main -> main; anything else -> NONE (local builds: UNKNOWN).
 name: CI
 
@@ -166,4 +167,174 @@ jobs:
           path: |
             frontend/reports/junit.xml
             frontend/reports/coverage/
+          if-no-files-found: warn
+
+  # SCRUM-7-AC-20 (ADR 0010-0012): images + Compose stack + e2e. Parallel to build/frontend.
+  e2e:
+    needs: identity
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    env:
+      JIRA_KEY: ${{ needs.identity.outputs.jira_key }}
+      GIT_COMMIT: ${{ github.sha }}
+      GIT_BRANCH: ${{ github.head_ref || github.ref_name }} # untrusted (fork PRs): env / action inputs only, always quoted
+      TODO_IMAGE_TAG: ${{ needs.identity.outputs.jira_key }}-${{ github.sha }}
+      COMPOSE_PROFILES: app
+      COMPOSE_PROJECT_NAME: todo-e2e
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Lint Dockerfiles (hadolint, SCRUM-7-NFR-12)
+        run: docker run --rm -v "$PWD:/w:ro" -w /w hadolint/hadolint:v2.15.1 hadolint --config .hadolint.yaml Dockerfile frontend/Dockerfile
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version-file: frontend/.nvmrc
+          cache: npm
+          cache-dependency-path: |
+            e2e/package-lock.json
+            frontend/package-lock.json
+
+      - name: Image metadata
+        id: meta
+        run: |
+          echo "build_date=$(date -u +%Y-%m-%dT%H:%M:%SZ)" >> "$GITHUB_OUTPUT"
+          echo "backend_version=$(python3 -c 'import xml.etree.ElementTree as E; print(E.parse("pom.xml").getroot().findtext("{http://maven.apache.org/POM/4.0.0}version"))')" >> "$GITHUB_OUTPUT"
+          echo "frontend_version=$(node -p 'require("./frontend/package.json").version')" >> "$GITHUB_OUTPUT"
+
+      - uses: docker/setup-buildx-action@v3
+
+      - name: Build backend image (SCRUM-7-AC-01)
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: Dockerfile
+          load: true
+          push: false
+          provenance: false
+          sbom: false
+          tags: todo-backend:${{ env.TODO_IMAGE_TAG }}
+          build-args: |
+            JIRA_KEY=${{ env.JIRA_KEY }}
+            GIT_COMMIT=${{ github.sha }}
+            GIT_BRANCH=${{ env.GIT_BRANCH }}
+            VERSION=${{ steps.meta.outputs.backend_version }}
+            BUILD_DATE=${{ steps.meta.outputs.build_date }}
+          cache-from: type=gha,scope=todo-backend
+          cache-to: type=gha,scope=todo-backend,mode=max
+
+      - name: Build frontend image (SCRUM-7-AC-04)
+        uses: docker/build-push-action@v6
+        with:
+          context: frontend
+          file: frontend/Dockerfile
+          load: true
+          push: false
+          provenance: false
+          sbom: false
+          tags: todo-frontend:${{ env.TODO_IMAGE_TAG }}
+          build-args: |
+            JIRA_KEY=${{ env.JIRA_KEY }}
+            GIT_COMMIT=${{ github.sha }}
+            GIT_BRANCH=${{ env.GIT_BRANCH }}
+            VERSION=${{ steps.meta.outputs.frontend_version }}
+            BUILD_DATE=${{ steps.meta.outputs.build_date }}
+          cache-from: type=gha,scope=todo-frontend
+          cache-to: type=gha,scope=todo-frontend,mode=max
+
+      - name: Start stack and wait for health (SCRUM-7-AC-07, AC-09)
+        id: stack
+        run: docker compose up -d --no-build --wait --wait-timeout 240
+
+      - name: Verify images and containers (SCRUM-7-AC-22, NFR-01, NFR-02, NFR-03, NFR-05, NFR-06)
+        if: ${{ !cancelled() && steps.stack.outcome == 'success' }}
+        run: .github/scripts/verify-images.sh "todo-backend:${TODO_IMAGE_TAG}" "todo-frontend:${TODO_IMAGE_TAG}"
+
+      - name: Install e2e dependencies
+        if: ${{ !cancelled() && steps.stack.outcome == 'success' }}
+        working-directory: e2e
+        run: npm ci
+
+      - name: Playwright version
+        if: ${{ !cancelled() && steps.stack.outcome == 'success' }}
+        id: pw
+        working-directory: e2e
+        run: echo "version=$(node -p 'require("./node_modules/@playwright/test/package.json").version')" >> "$GITHUB_OUTPUT"
+
+      - name: Cache Playwright browsers
+        if: ${{ !cancelled() && steps.stack.outcome == 'success' }}
+        id: pw-cache
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/ms-playwright
+          key: playwright-${{ runner.os }}-${{ steps.pw.outputs.version }}
+
+      - name: Install Chromium
+        if: ${{ !cancelled() && steps.stack.outcome == 'success' }}
+        working-directory: e2e
+        env:
+          CACHE_HIT: ${{ steps.pw-cache.outputs.cache-hit }}
+        run: |
+          if [ "$CACHE_HIT" = "true" ]; then
+            npx playwright install-deps chromium
+          else
+            npx playwright install --with-deps --only-shell chromium
+          fi
+
+      - name: E2E against Compose (SCRUM-7-AC-18, AC-19)
+        if: ${{ !cancelled() && steps.stack.outcome == 'success' }}
+        working-directory: e2e
+        env:
+          E2E_EXPECT_EMPTY_DB: "1"
+          E2E_JIRA_KEY: ${{ env.JIRA_KEY }}
+          E2E_GIT_SHA: ${{ github.sha }}
+        run: npx playwright test
+
+      - name: Install frontend dependencies (dev mode)
+        if: ${{ !cancelled() && steps.stack.outcome == 'success' }}
+        working-directory: frontend
+        run: npm ci
+
+      - name: E2E dev mode — Vite 5173 → backend 8080 cross-origin (SCRUM-7-AC-21, closes SCRUM-1-AC-14)
+        if: ${{ !cancelled() && steps.stack.outcome == 'success' }}
+        working-directory: e2e
+        env:
+          E2E_MODE: dev
+        run: npx playwright test
+
+      - name: Lifecycle and persistence (SCRUM-7-AC-03, AC-10)
+        if: ${{ !cancelled() && steps.stack.outcome == 'success' }}
+        run: .github/scripts/verify-lifecycle.sh
+
+      - name: E2E summary (SCRUM-7-NFR-09)
+        if: always()
+        run: node e2e/scripts/summarize.mjs >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Diagnostics on failure (compose ps, health, logs)
+        if: failure()
+        run: |
+          docker compose ps -a || true
+          for c in $(docker compose ps -aq); do
+            echo "::group::health $(docker inspect -f '{{ .Name }}' "$c")"
+            docker inspect -f '{{ json .State }}' "$c" || true
+            echo "::endgroup::"
+          done
+          echo "::group::docker compose logs (last 200 lines per service)"
+          docker compose logs --no-color --timestamps --tail 200 || true
+          echo "::endgroup::"
+
+      - name: Collect Compose logs and tear down
+        if: always()
+        run: |
+          mkdir -p e2e/reports
+          docker compose ps -a > e2e/reports/compose-ps.txt 2>&1 || true
+          docker compose logs --no-color --timestamps > e2e/reports/compose-logs.txt 2>&1 || true
+          docker compose down -v --remove-orphans
+
+      - name: Upload e2e reports
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: todo-e2e-${{ env.JIRA_KEY }}-${{ github.sha }}-reports
+          path: e2e/reports/
           if-no-files-found: warn

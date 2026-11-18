@@ -1,0 +1,6 @@
+# /.dockerignore — SCRUM-7-NFR-06: backend build context = only what the Maven build needs (allow-list)
+*
+!pom.xml
+!mvnw
+!.mvn/
+!src/
