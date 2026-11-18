@@ -36,7 +36,7 @@ COPY --from=frontend-dist / /dist/
 FROM dist-${DIST_SOURCE} AS dist
 
 # ---- runtime stage: unprivileged nginx (UID 101, port 8080) ----
-FROM nginxinc/nginx-unprivileged:1.30.6-alpine3.24
+FROM nginxinc/nginx-unprivileged:1.30.7-alpine3.24
 COPY nginx/security-headers.conf nginx/proxy.conf /etc/nginx/snippets/
 # Rendered by the entrypoint to /etc/nginx/conf.d/default.conf (replaces the base image's default server).
 COPY nginx/default.conf.template /etc/nginx/templates/default.conf.template
@@ -64,6 +64,6 @@ LABEL org.opencontainers.image.title="todo-frontend" \
       org.opencontainers.image.source="${SOURCE_URL}" \
       org.opencontainers.image.created="${BUILD_DATE}" \
       org.opencontainers.image.licenses="NOASSERTION" \
-      org.opencontainers.image.base.name="docker.io/nginxinc/nginx-unprivileged:1.30.6-alpine3.24" \
+      org.opencontainers.image.base.name="docker.io/nginxinc/nginx-unprivileged:1.30.7-alpine3.24" \
       com.vinods21.todo.jira="${JIRA_KEY}" \
       com.vinods21.todo.branch="${GIT_BRANCH}"

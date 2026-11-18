@@ -66,12 +66,15 @@ Docker can run the stack. Constraints:
 | Image | Build stage | Runtime stage |
 |---|---|---|
 | backend | `eclipse-temurin:21.0.13_9-jdk-noble` (glibc; has `curl`/`wget`, which the only-script Maven Wrapper needs to download Maven 3.9.11) | `eclipse-temurin:21.0.13_9-jre-alpine` (JRE only; busybox `wget` for the healthcheck) |
-| frontend | `node:22.23.4-alpine` (Node major = `frontend/.nvmrc`; satisfies `engines` `>=22.22.2 <23`) | `nginxinc/nginx-unprivileged:1.30.6-alpine3.24` (stable line; runs as UID 101, listens on 8080) |
+| frontend | `node:22.23.4-alpine` (Node major = `frontend/.nvmrc`; satisfies `engines` `>=22.22.2 <23`) | `nginxinc/nginx-unprivileged:1.30.7-alpine3.24` (stable line; runs as UID 101, listens on 8080) |
 | postgres (Compose) | — | `postgres:16-alpine` — unchanged, deliberately the **same tag as Testcontainers** in the backend tests so the e2e and integration databases match; bump both together |
 
 - Tags only, **no digests** (Q-04): digests without automated update tooling (Dependabot/Renovate `docker`
   ecosystem) rot silently; follow-up story together with Q-01/Q-02.
 - Bumping a base image is a deliberate change to the Dockerfile and this table.
+- **SCRUM-8 (2026-11-18):** frontend runtime `nginx-unprivileged` `1.30.6-alpine3.24` → `1.30.7-alpine3.24` (same
+  stable line) to clear fixable CRITICAL/HIGH Alpine package CVEs found by the new release gate (ADR 0014; Release run
+  44362670868). Keep `org.opencontainers.image.base.name` in the Dockerfile in sync with every bump.
 
 ### Image structure
 
