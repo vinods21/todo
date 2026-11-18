@@ -240,6 +240,14 @@
                     <includeLicenseText>false</includeLicenseText>
                 </configuration>
                 <executions>
+                    <!-- spring-boot-starter-parent binds makeAggregateBom (execution "default") to generate-resources once
+                         the plugin is declared and embeds META-INF/sbom/application.cdx.json in the jar. Not wanted here:
+                         the release SBOMs are separate assets (design §7.1), and the embedded file made the jar differ
+                         between builds (Release run 44361893163, NFR-03). -->
+                    <execution>
+                        <id>default</id>
+                        <phase>none</phase>
+                    </execution>
                     <execution>
                         <id>runtime</id>
                         <phase>none</phase>
