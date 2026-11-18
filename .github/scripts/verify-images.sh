@@ -6,7 +6,7 @@ set -euo pipefail
 
 backend="$1"
 frontend="$2"
-summary="${GITHUB_STEP_SUMMARY:-/dev/stdout}"
+summary="${GITHUB_STEP_SUMMARY:-/dev/null}" # the table is also printed to stdout
 failures=0
 
 fail() {
@@ -89,7 +89,7 @@ done
   printf '%s\n' "${rows[@]}"
   echo
   echo "Sizes: \`docker image inspect .Size\` (uncompressed)."
-} >> "$summary"
+} | tee -a "$summary"   # also in the job log (step summaries are not available through the REST API)
 
 if [ "$failures" -gt 0 ]; then
   echo "$failures image check(s) failed"
