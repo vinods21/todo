@@ -10,6 +10,9 @@ import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Tag;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.Arguments;
+import org.junit.jupiter.params.provider.MethodSource;
 import org.mockito.ArgumentCaptor;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
@@ -24,13 +27,16 @@ import java.time.Instant;
 import java.time.LocalDate;
 import java.time.ZoneOffset;
 import java.util.List;
+import java.util.Arrays;
 import java.util.Optional;
+import java.util.stream.Stream;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyLong;
+import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
@@ -169,5 +175,80 @@ class TaskServiceTest {
 
         assertThat(ex.getId()).isEqualTo(99L);
         verify(taskRepository, never()).deleteById(anyLong());
+    }
+
+    // ---------------------------------------------------------------- SCRUM-6: status change and filter
+
+    @Test
+    @Tag("SCRUM-6")
+    @DisplayName("SCRUM-6-AC-01: updateStatus changes only the status and keeps id, title, description, dueDate and createdAt")
+    void updateStatusChangesOnlyStatus() {
+        Task existing = existingTask(7L);
+        when(taskRepository.findById(7L)).thenReturn(Optional.of(existing));
+        when(taskRepository.save(existing)).thenReturn(existing);
+
+        Task updated = taskService.updateStatus(7L, TaskStatus.IN_PROGRESS);
+
+        verify(taskRepository).save(existing);
+        assertThat(updated).isSameAs(existing);
+        assertThat(updated.getStatus()).isEqualTo(TaskStatus.IN_PROGRESS);
+        assertThat(updated.getId()).isEqualTo(7L);
+        assertThat(updated.getTitle()).isEqualTo("Old title");
+        assertThat(updated.getDescription()).isEqualTo("Old description");
+        assertThat(updated.getDueDate()).isEqualTo(LocalDate.of(2026, 11, 20));
+        assertThat(updated.getCreatedAt()).isEqualTo(CREATED);
+    }
+
+    static Stream<Arguments> allTransitions() {
+        return Arrays.stream(TaskStatus.values())
+                .flatMap(from -> Arrays.stream(TaskStatus.values()).map(to -> Arguments.of(from, to)));
+    }
+
+    @ParameterizedTest(name = "SCRUM-6-AC-02: {0} -> {1} is allowed")
+    @MethodSource("allTransitions")
+    @Tag("SCRUM-6")
+    @DisplayName("SCRUM-6-AC-02: every from-to status combination (incl. backwards and same-to-same) is allowed")
+    void everyTransitionAllowed(TaskStatus from, TaskStatus to) {
+        Task existing = existingTask(3L);
+        existing.setStatus(from);
+        when(taskRepository.findById(3L)).thenReturn(Optional.of(existing));
+        when(taskRepository.save(existing)).thenReturn(existing);
+
+        Task updated = taskService.updateStatus(3L, to);
+
+        assertThat(updated.getStatus()).isEqualTo(to);
+        assertThat(updated.getTitle()).isEqualTo("Old title");
+    }
+
+    @Test
+    @Tag("SCRUM-6")
+    @DisplayName("SCRUM-6-AC-03: updateStatus throws TaskNotFoundException for an unknown id and saves nothing")
+    void updateStatusThrowsWhenMissing() {
+        when(taskRepository.findById(99L)).thenReturn(Optional.empty());
+
+        assertThatThrownBy(() -> taskService.updateStatus(99L, TaskStatus.DONE))
+                .isInstanceOf(TaskNotFoundException.class)
+                .hasMessage("Task with id 99 not found");
+        verify(taskRepository, never()).save(any(Task.class));
+    }
+
+    @Test
+    @Tag("SCRUM-6")
+    @DisplayName("SCRUM-6-AC-05, SCRUM-6-NFR-08: listByStatus queries findByStatus with page, size and newest-first sort, never findAll")
+    void listByStatusFiltersInDatabase() {
+        Page<Task> page = new PageImpl<>(List.of(existingTask(1L)));
+        when(taskRepository.findByStatus(eq(TaskStatus.DONE), any(Pageable.class))).thenReturn(page);
+
+        Page<Task> result = taskService.listByStatus(2, 5, TaskStatus.DONE);
+
+        ArgumentCaptor<Pageable> captor = ArgumentCaptor.forClass(Pageable.class);
+        verify(taskRepository).findByStatus(eq(TaskStatus.DONE), captor.capture());
+        Pageable pageable = captor.getValue();
+        assertThat(result).isSameAs(page);
+        assertThat(pageable.getPageNumber()).isEqualTo(2);
+        assertThat(pageable.getPageSize()).isEqualTo(5);
+        assertThat(pageable.getSort())
+                .isEqualTo(Sort.by(Sort.Direction.DESC, "createdAt").and(Sort.by(Sort.Direction.DESC, "id")));
+        verify(taskRepository, never()).findAll(any(Pageable.class));
     }
 }

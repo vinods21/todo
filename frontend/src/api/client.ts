@@ -3,7 +3,8 @@ import { ApiError, GENERIC_ERROR_MESSAGE, NETWORK_ERROR_MESSAGE, toApiError } fr
 
 // The only module that calls fetch (ADR 0006).
 
-export type HttpMethod = 'GET' | 'POST' | 'PUT'
+// Upper-case on purpose: fetch only normalises GET/POST/PUT/DELETE/HEAD/OPTIONS, a lower-case 'patch' is sent verbatim.
+export type HttpMethod = 'GET' | 'POST' | 'PUT' | 'PATCH'
 export type Query = Record<string, string | number | undefined>
 
 export interface RequestOptions {

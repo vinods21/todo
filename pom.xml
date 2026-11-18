@@ -21,7 +21,8 @@
 
     <properties>
         <java.version>21</java.version>
-        <jira.issue>SCRUM-2</jira.issue>
+        <!-- ADR 0008: overridden by CI with -Djira.issue=<key derived from the branch>; UNKNOWN for local builds -->
+        <jira.issue>UNKNOWN</jira.issue>
         <jacoco.version>0.8.13</jacoco.version>
         <git-commit-id-plugin.version>9.0.1</git-commit-id-plugin.version>
     </properties>
@@ -165,6 +166,10 @@
                     <statelessTestsetReporter implementation="org.apache.maven.plugin.surefire.extensions.junit5.JUnit5Xml30StatelessReporter">
                         <usePhrasedTestCaseMethodName>true</usePhrasedTestCaseMethodName>
                     </statelessTestsetReporter>
+                    <!-- ADR 0008: lets TodoApplicationIntegrationTest assert /actuator/info build.jira == the configured key -->
+                    <systemPropertyVariables>
+                        <build.jira.expected>${jira.issue}</build.jira.expected>
+                    </systemPropertyVariables>
                 </configuration>
             </plugin>
 

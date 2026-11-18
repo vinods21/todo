@@ -65,6 +65,31 @@ class CorsConfigTest {
                 .andExpect(header().doesNotExist(HttpHeaders.ACCESS_CONTROL_ALLOW_ORIGIN));
     }
 
+    private static ResultActions statusPatchPreflight(MockMvc mvc, String origin) throws Exception {
+        return mvc.perform(options("/api/tasks/1/status")
+                .header(HttpHeaders.ORIGIN, origin)
+                .header(HttpHeaders.ACCESS_CONTROL_REQUEST_METHOD, "PATCH")
+                .header(HttpHeaders.ACCESS_CONTROL_REQUEST_HEADERS, "content-type"));
+    }
+
+    @Test
+    @Tag("SCRUM-6")
+    @DisplayName("SCRUM-6-AC-04: preflight for PATCH /api/tasks/{id}/status from the default origin allows PATCH")
+    void patchPreflightAllowed() throws Exception {
+        statusPatchPreflight(mockMvc, "http://localhost:5173")
+                .andExpect(status().isOk())
+                .andExpect(header().string(HttpHeaders.ACCESS_CONTROL_ALLOW_ORIGIN, "http://localhost:5173"))
+                .andExpect(header().string(HttpHeaders.ACCESS_CONTROL_ALLOW_METHODS, containsString("PATCH")));
+    }
+
+    @Test
+    @Tag("SCRUM-6")
+    @DisplayName("SCRUM-6-AC-04: PATCH preflight from a non-allowed origin gets no Access-Control-Allow-Origin header")
+    void patchPreflightForeignOriginRejected() throws Exception {
+        statusPatchPreflight(mockMvc, "http://evil.test")
+                .andExpect(header().doesNotExist(HttpHeaders.ACCESS_CONTROL_ALLOW_ORIGIN));
+    }
+
     @Nested
     @Tag("SCRUM-2")
     @DisplayName("SCRUM-2 CORS with APP_CORS_ALLOWED_ORIGINS override")

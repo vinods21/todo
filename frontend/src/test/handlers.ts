@@ -1,5 +1,5 @@
 import { http, HttpResponse } from 'msw'
-import type { Page, Task, TaskCreateRequest } from '../api/types'
+import { isTaskStatus, type Page, type Task, type TaskCreateRequest, type TaskStatusUpdateRequest } from '../api/types'
 import { API, errorBody } from './fixtures'
 
 // Default MSW handlers: an in-memory task store with SCRUM-2 semantics (newest first, page/size, 404 and 400 bodies).
@@ -14,7 +14,7 @@ const store: Store = { tasks: [], nextId: 1, clock: Date.parse('2026-11-01T00:00
 
 /** Every request the default handlers served, e.g. `GET /api/tasks?page=0&size=20`. */
 export const requestLog: string[] = []
-/** JSON bodies of POST/PUT requests the default handlers served, in order. */
+/** JSON bodies of POST/PUT/PATCH requests the default handlers served, in order. */
 export const bodyLog: unknown[] = []
 
 function nextCreatedAt(): string {
@@ -87,7 +87,12 @@ export const handlers = [
     const url = new URL(request.url)
     const page = Number(url.searchParams.get('page') ?? '0')
     const size = Math.min(Number(url.searchParams.get('size') ?? '20'), 100)
-    const sorted = [...store.tasks].sort(newestFirst)
+    // SCRUM-6-AC-05..AC-07 semantics: exact enum name filters; anything else is a 400 (the app never sends it).
+    const status = url.searchParams.get('status')
+    if (status !== null && !isTaskStatus(status)) {
+      return HttpResponse.json(errorBody(400, "Invalid value for parameter 'status'"), { status: 400 })
+    }
+    const sorted = store.tasks.filter((t) => status === null || t.status === status).sort(newestFirst)
     const body: Page<Task> = {
       items: sorted.slice(page * size, page * size + size),
       page,
@@ -126,6 +131,25 @@ export const handlers = [
     const invalid = validate(body, `/api/tasks/${id}`)
     if (invalid) return invalid
     Object.assign(existing, { ...body, title: body.title.trim() })
+    return HttpResponse.json(existing)
+  }),
+
+  // SCRUM-6-AC-01..AC-03 semantics: only status changes; 404 unknown id; 400 with a status field error.
+  http.patch(`${API}/tasks/:id/status`, async ({ request, params }) => {
+    log(request)
+    const id = idOf(params)
+    const path = `/api/tasks/${id}/status`
+    const body = (await request.json()) as TaskStatusUpdateRequest
+    bodyLog.push(body)
+    const existing = storedTask(id)
+    if (!existing) return HttpResponse.json(errorBody(404, `Task with id ${id} not found`, [], path), { status: 404 })
+    if (typeof body.status !== 'string' || !isTaskStatus(body.status)) {
+      return HttpResponse.json(
+        errorBody(400, "Invalid value for field 'status'", [{ field: 'status', message: 'invalid value' }], path),
+        { status: 400 },
+      )
+    }
+    existing.status = body.status
     return HttpResponse.json(existing)
   }),
 ]

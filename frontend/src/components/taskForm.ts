@@ -1,5 +1,5 @@
 import type { ApiError } from '../api/errors'
-import { TASK_STATUSES, type Task, type TaskCreateRequest, type TaskStatus, type TaskUpdateRequest } from '../api/types'
+import { isTaskStatus, type Task, type TaskCreateRequest, type TaskStatus, type TaskUpdateRequest } from '../api/types'
 
 // Pure form model: values ↔ requests, client validation mirroring SCRUM-2 Bean Validation, server error mapping.
 
@@ -33,9 +33,8 @@ export function isFormField(value: string): value is FormField {
   return (FORM_FIELDS as readonly string[]).includes(value)
 }
 
-export function isTaskStatus(value: string): value is TaskStatus {
-  return (TASK_STATUSES as readonly string[]).includes(value)
-}
+/** Re-exported for existing imports; the guard lives with the types (SCRUM-6 design §4.2). */
+export { isTaskStatus }
 
 /** SCRUM-1-AC-07: same rules as the backend (title trimmed 1–200, description ≤ 2000, past due dates OK). */
 export function validateTaskForm(values: TaskFormValues): FieldErrors {

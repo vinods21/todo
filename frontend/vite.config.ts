@@ -17,7 +17,8 @@ function firstNonEmpty(...values: (string | undefined)[]): string | undefined {
   return values.find((v) => v !== undefined && v.trim() !== '')
 }
 
-const jira = firstNonEmpty(process.env.JIRA_KEY) ?? 'SCRUM-1'
+// ADR 0008: CI derives JIRA_KEY from the branch (identity job); local builds without it say UNKNOWN.
+const jira = firstNonEmpty(process.env.JIRA_KEY) ?? 'UNKNOWN'
 const commit = firstNonEmpty(process.env.GITHUB_SHA, git('rev-parse HEAD')) ?? 'unknown'
 const branch =
   firstNonEmpty(
