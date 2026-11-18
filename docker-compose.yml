@@ -1,6 +1,11 @@
 # SCRUM-2-NFR-03 + SCRUM-7 (AC-07..AC-12, design §6). Credentials are LOCAL-DEVELOPMENT DEFAULTS, not secrets.
 #   PostgreSQL only (local dev):  docker compose up -d
 #   Whole stack:                  docker compose --profile app up --build -d --wait   → http://localhost:3000
+#   Published release (SCRUM-8-AC-15, docs/release/RELEASE.md), no build:
+#     TODO_BACKEND_IMAGE=ghcr.io/vinods21/todo-backend TODO_FRONTEND_IMAGE=ghcr.io/vinods21/todo-frontend \
+#     TODO_IMAGE_TAG=0.1.0 docker compose --profile app pull backend frontend
+#     … same env … docker compose --profile app up --no-build -d --wait
+#   Pin by digest (rollback, docs/release/ROLLBACK.md): TODO_BACKEND_TAG=0.1.0@sha256:<digest> (same for FRONTEND).
 # Override any ${TODO_*} via environment or a git-ignored .env (see .env.example).
 services:
   postgres:
@@ -31,9 +36,10 @@ services:
         JIRA_KEY: ${JIRA_KEY:-UNKNOWN}
         GIT_COMMIT: ${GIT_COMMIT:-UNKNOWN}
         GIT_BRANCH: ${GIT_BRANCH:-UNKNOWN}
-        VERSION: ${TODO_BACKEND_VERSION:-UNKNOWN}
+        VERSION: ${TODO_VERSION:-0.0.0-SNAPSHOT}   # SCRUM-8: one product version (ADR 0013)
         BUILD_DATE: ${BUILD_DATE:-UNKNOWN}
-    image: todo-backend:${TODO_IMAGE_TAG:-local}
+    # SCRUM-8-AC-15: repository and tag overridable to run a published image (defaults: todo-backend:local).
+    image: ${TODO_BACKEND_IMAGE:-todo-backend}:${TODO_BACKEND_TAG:-${TODO_IMAGE_TAG:-local}}
     environment:
       DB_URL: jdbc:postgresql://postgres:5432/${TODO_DB_NAME:-todo}
       DB_USERNAME: ${TODO_DB_USER:-todo}
@@ -67,9 +73,10 @@ services:
         JIRA_KEY: ${JIRA_KEY:-UNKNOWN}
         GIT_COMMIT: ${GIT_COMMIT:-UNKNOWN}
         GIT_BRANCH: ${GIT_BRANCH:-UNKNOWN}
-        VERSION: ${TODO_FRONTEND_VERSION:-UNKNOWN}
+        VERSION: ${TODO_VERSION:-0.0.0-SNAPSHOT}   # SCRUM-8: one product version (ADR 0013)
         BUILD_DATE: ${BUILD_DATE:-UNKNOWN}
-    image: todo-frontend:${TODO_IMAGE_TAG:-local}
+    # SCRUM-8-AC-15: repository and tag overridable to run a published image (defaults: todo-frontend:local).
+    image: ${TODO_FRONTEND_IMAGE:-todo-frontend}:${TODO_FRONTEND_TAG:-${TODO_IMAGE_TAG:-local}}
     environment:
       BACKEND_URL: http://backend:8080
     ports:
