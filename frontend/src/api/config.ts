@@ -2,6 +2,11 @@
 
 export const DEFAULT_API_BASE_URL = 'http://localhost:8080'
 
+/**
+ * Trims whitespace and trailing slashes. `/` (only slashes) = same-origin → `''` (SCRUM-7-AC-17, ADR 0011: the
+ * container image is built with `VITE_API_BASE_URL=/` and nginx proxies `/api/**`); blank/unset →
+ * `DEFAULT_API_BASE_URL`.
+ */
 export function resolveApiBaseUrl(raw: string | undefined): string {
   const value = raw?.trim()
   return (value ? value : DEFAULT_API_BASE_URL).replace(/\/+$/, '')

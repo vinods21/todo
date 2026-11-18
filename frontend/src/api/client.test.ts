@@ -158,3 +158,42 @@ describe('SCRUM-1 API client', () => {
     expect(isApiErrorBody([])).toBe(false)
   })
 })
+
+describe('SCRUM-7 same-origin API base', () => {
+  afterEach(() => {
+    vi.unstubAllEnvs()
+    vi.resetModules()
+  })
+
+  it('SCRUM-7-AC-17: an empty (same-origin) base resolves requests against the page origin', () => {
+    expect(window.location.origin).toBe('http://localhost:3000')
+    expect(buildUrl('/api/tasks', { page: 0, size: 20, status: 'DONE' }, '').toString()).toBe(
+      `${window.location.origin}/api/tasks?page=0&size=20&status=DONE`,
+    )
+    expect(buildUrl('/api/tasks/7/status', undefined, '').toString()).toBe(`${window.location.origin}/api/tasks/7/status`)
+  })
+
+  it('SCRUM-7-AC-17: an absolute base ignores the page origin; the default call is unchanged', () => {
+    expect(buildUrl('/api/tasks', undefined, 'https://api.example.test').toString()).toBe(
+      'https://api.example.test/api/tasks',
+    )
+    expect(buildUrl('/api/tasks', { page: 1 }).toString()).toBe('http://localhost:8080/api/tasks?page=1')
+  })
+
+  it("SCRUM-7-AC-17: with VITE_API_BASE_URL='/' requests are sent to <page origin>/api/…", async () => {
+    vi.stubEnv('VITE_API_BASE_URL', '/')
+    vi.resetModules()
+    const config = await import('./config')
+    const client = await import('./client')
+    expect(config.API_BASE_URL).toBe('')
+    let seen: string | undefined
+    server.use(
+      http.get(`${window.location.origin}/api/tasks`, ({ request: req }) => {
+        seen = req.url
+        return HttpResponse.json({ ok: true })
+      }),
+    )
+    await expect(client.request('GET', '/api/tasks', { query: { page: 0 } })).resolves.toEqual({ ok: true })
+    expect(seen).toBe('http://localhost:3000/api/tasks?page=0')
+  })
+})

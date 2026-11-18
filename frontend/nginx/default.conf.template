@@ -1,0 +1,70 @@
+# SCRUM-7: SPA hosting + reverse proxy — ADR 0011, design §4 (AC-05, AC-06, NFR-07, NFR-12).
+# Rendered by the nginx entrypoint (envsubst, NGINX_ENVSUBST_FILTER) into /etc/nginx/conf.d/default.conf.
+# ${BACKEND_URL}: scheme://host:port of the API, no path (default http://backend:8080).
+# ${NGINX_LOCAL_RESOLVERS}: filled from /etc/resolv.conf by 15-local-resolvers.envsh (Docker DNS).
+
+server_tokens off;
+
+server {
+    listen 8080;
+    server_name _;
+    root /usr/share/nginx/html;
+    absolute_redirect off;          # never leak the internal port 8080 in redirects
+
+    resolver ${NGINX_LOCAL_RESOLVERS} valid=10s ipv6=off;
+    set $backend "${BACKEND_URL}";  # variable → re-resolved, nginx starts even if the backend is not up yet
+
+    gzip on;
+    gzip_vary on;
+    gzip_min_length 1024;
+    gzip_types text/css application/javascript application/json image/svg+xml text/plain;
+
+    include /etc/nginx/snippets/security-headers.conf;
+
+    # NFR-07: container healthcheck — nginx itself, independent of the backend.
+    location = /healthz {
+        access_log off;
+        default_type text/plain;
+        return 200 "ok\n";
+    }
+
+    # AC-06: API → backend. No URI in proxy_pass: the original path + query string are forwarded unchanged.
+    location ^~ /api/ {
+        proxy_pass $backend;
+        include /etc/nginx/snippets/proxy.conf;
+    }
+
+    # AC-06: health only (Q-05: /actuator/info is checked on the backend port, not proxied).
+    location = /actuator/health {
+        proxy_pass $backend;
+        include /etc/nginx/snippets/proxy.conf;
+    }
+    location ^~ /actuator/ {
+        return 404;
+    }
+
+    # AC-05: fingerprinted assets — long-lived; missing → 404 (never index.html).
+    location ^~ /assets/ {
+        try_files $uri =404;
+        include /etc/nginx/snippets/security-headers.conf;
+        add_header Cache-Control "public, max-age=31536000, immutable" always;
+    }
+
+    # AC-05: any other path ending in a file extension (/build-info.json, /favicon.ico, /nope.png): file or 404.
+    location ~ \.[^/]+$ {
+        try_files $uri =404;
+        include /etc/nginx/snippets/security-headers.conf;
+        add_header Cache-Control "no-cache" always;
+    }
+
+    # AC-05: the SPA entry point is always revalidated.
+    location = /index.html {
+        include /etc/nginx/snippets/security-headers.conf;
+        add_header Cache-Control "no-cache" always;
+    }
+
+    # AC-05: history-API fallback for client-side routes (/tasks/new, /tasks/42/edit, /?status=DONE&page=2).
+    location / {
+        try_files $uri /index.html;
+    }
+}
