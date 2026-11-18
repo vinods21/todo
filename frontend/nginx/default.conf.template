@@ -42,6 +42,10 @@ server {
     location ^~ /actuator/ {
         return 404;
     }
+    # The bare discovery path too — otherwise it would fall through to the SPA fallback (index.html, 200).
+    location = /actuator {
+        return 404;
+    }
 
     # AC-05: fingerprinted assets — long-lived; missing → 404 (never index.html).
     location ^~ /assets/ {
