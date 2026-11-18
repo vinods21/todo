@@ -304,6 +304,19 @@ jobs:
         if: always()
         run: node e2e/scripts/summarize.mjs >> "$GITHUB_STEP_SUMMARY"
 
+      - name: Diagnostics on failure (compose ps, health, logs)
+        if: failure()
+        run: |
+          docker compose ps -a || true
+          for c in $(docker compose ps -aq); do
+            echo "::group::health $(docker inspect -f '{{ .Name }}' "$c")"
+            docker inspect -f '{{ json .State }}' "$c" || true
+            echo "::endgroup::"
+          done
+          echo "::group::docker compose logs (last 200 lines per service)"
+          docker compose logs --no-color --timestamps --tail 200 || true
+          echo "::endgroup::"
+
       - name: Collect Compose logs and tear down
         if: always()
         run: |
