@@ -1,0 +1,62 @@
+# SCRUM-9-AC-02, AC-12..AC-14 (ADR 0015, design §6.2): run summary, diagnostics on failure, Compose logs,
+# `down -v --remove-orphans`, report upload — moved verbatim from ci.yml job `e2e`. Shared by CI `e2e` and Release
+# `e2e-release`. Call it with `if: always()` and pass `job-status: ${{ job.status }}` (status functions inside a
+# composite only see the composite's own steps). Needs COMPOSE_* and JIRA_KEY in the job env.
+name: e2e-teardown
+description: E2E summary, diagnostics, Compose logs, teardown (down -v) and report upload
+inputs:
+  artifact-name:
+    description: Report artifact name (ADR 0008 naming)
+    required: true
+  job-status:
+    description: job.status of the caller (diagnostics are printed when it is 'failure')
+    required: true
+  summary-modes:
+    description: Playwright modes summarized by e2e/scripts/summarize.mjs
+    required: false
+    default: compose dev
+  retention-days:
+    description: Artifact retention in days; empty = repository default
+    required: false
+    default: ""
+runs:
+  using: composite
+  steps:
+    - name: E2E summary (SCRUM-7-NFR-09, SCRUM-9-AC-13)
+      if: always()
+      shell: bash
+      env:
+        E2E_SUMMARY_MODES: ${{ inputs.summary-modes }}
+      run: node e2e/scripts/summarize.mjs >> "$GITHUB_STEP_SUMMARY"
+
+    - name: Diagnostics on failure (compose ps, health, logs)
+      if: always() && inputs.job-status == 'failure' # == the former `if: failure()` of the caller
+      shell: bash
+      run: |
+        docker compose ps -a || true
+        for c in $(docker compose ps -aq); do
+          echo "::group::health $(docker inspect -f '{{ .Name }}' "$c")"
+          docker inspect -f '{{ json .State }}' "$c" || true
+          echo "::endgroup::"
+        done
+        echo "::group::docker compose logs (last 200 lines per service)"
+        docker compose logs --no-color --timestamps --tail 200 || true
+        echo "::endgroup::"
+
+    - name: Collect Compose logs and tear down (SCRUM-9-AC-14)
+      if: always()
+      shell: bash
+      run: |
+        mkdir -p e2e/reports
+        docker compose ps -a > e2e/reports/compose-ps.txt 2>&1 || true
+        docker compose logs --no-color --timestamps > e2e/reports/compose-logs.txt 2>&1 || true
+        docker compose down -v --remove-orphans
+
+    - name: Upload e2e reports (SCRUM-9-AC-12)
+      if: always()
+      uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+      with:
+        name: ${{ inputs.artifact-name }}
+        path: e2e/reports/
+        if-no-files-found: warn
+        retention-days: ${{ inputs.retention-days }}

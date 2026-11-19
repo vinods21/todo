@@ -1,0 +1,37 @@
+# SCRUM-9-AC-02 (ADR 0015, design §6.1): e2e dependencies + Playwright Chromium, cached by Playwright version.
+# Shared by CI job `e2e` and Release job `e2e-release` (moved verbatim from ci.yml). Caller: checkout + setup-node
+# done; working directory = repository root. The caller decides when to run it (`if:` on the `uses:` step).
+name: e2e-playwright
+description: Install e2e dependencies and the Playwright Chromium headless shell (cached)
+runs:
+  using: composite
+  steps:
+    - name: Install e2e dependencies
+      shell: bash
+      working-directory: e2e
+      run: npm ci
+
+    - name: Playwright version
+      id: pw
+      shell: bash
+      working-directory: e2e
+      run: echo "version=$(node -p 'require("./node_modules/@playwright/test/package.json").version')" >> "$GITHUB_OUTPUT"
+
+    - name: Cache Playwright browsers
+      id: pw-cache
+      uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+      with:
+        path: ~/.cache/ms-playwright
+        key: playwright-${{ runner.os }}-${{ steps.pw.outputs.version }} # same key as before → shared cache
+
+    - name: Install Chromium
+      shell: bash
+      working-directory: e2e
+      env:
+        CACHE_HIT: ${{ steps.pw-cache.outputs.cache-hit }}
+      run: |
+        if [ "$CACHE_HIT" = "true" ]; then
+          npx playwright install-deps chromium
+        else
+          npx playwright install --with-deps --only-shell chromium
+        fi
