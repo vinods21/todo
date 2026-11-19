@@ -12,6 +12,9 @@
   — `VERSION` build argument now carries the product/build version (not the pom/package.json value), both Dockerfiles
   gain a `prebuilt` artefact mode, images gain `org.opencontainers.image.base.name`, and CI images are additionally
   tagged with the build version.
+- **Amended by:** [ADR 0015](0015-pre-release-e2e-gate.md) (SCRUM-9) — §3: job `e2e-release` (after `images`,
+  parallel to `sbom`/`scan`) is a required input of `release-gate`; §6: the cache/upload steps of CI job `e2e` are
+  SHA-pinned via the shared e2e composite actions.
 - Related: [ADR 0014](0014-vulnerability-scanning-policy.md) (SBOM, scanning, gate, attestations)
 - Design: [SCRUM-8 design](../architecture/SCRUM-8-design.md)
 
