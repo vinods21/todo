@@ -88,7 +88,8 @@ What each job does:
 | `sbom` | Trivy image SBOMs from the OCI archives; finalizes all four SBOMs; CycloneDX schema validation; minimum component counts | both |
 | `scan` | Trivy DB update (fails closed), 6 scan targets, live gate self-test, **vulnerability gate** | both |
 | `code-scanning` | SARIF → Security tab (not for fork PRs; reporting only) | both |
-| `release-gate` | **single aggregation point**: every gate must be `success`; assembles the release-candidate bundle (`SHA256SUMS`, notes) | both |
+| `e2e-release` | **pre-release e2e gate** (SCRUM-9, ADR 0015): loads the two OCI archives into the runner's Docker (digest-checked; no rebuild, no pull, no login), asserts that the running containers are exactly those images (digest chain, image store recorded), Compose stack, full Playwright compose suite + `@critical` guard (≥ 12, all passed), image + lifecycle checks; report artifact; always `down -v` | both |
+| `release-gate` | **single aggregation point**: every gate incl. `e2e-release` must be `success`; assembles the release-candidate bundle (`SHA256SUMS`, notes) | both |
 | `publish` | pre-existence (authoritative) → push immutable tags → attestations → annotated tag → draft release → publish → move `X.Y`/`latest` | **release only** |
 | `verify` | post-publish verification from the outside (AC-28) | **release only** |
 
@@ -110,14 +111,61 @@ Outputs of a dry run (workflow artifacts, ADR 0008 naming):
 | `todo-release-candidate-<KEY>-<sha>` | the would-be release: `assets/` (jar, tarball, 4 SBOMs, scan reports, image list, `SHA256SUMS`), `release-notes.md` (DRY RUN banner), `plan.json` — 30 days |
 | `todo-release-scan-<KEY>-<sha>` | Trivy JSON + SARIF per target, `verdict.json`, `summary.md`, DB metadata, live self-test log |
 | `todo-release-sbom-<KEY>-<sha>` | the four finalized SBOMs + component counts |
-| `todo-release-images-<KEY>-<sha>` | the two OCI archives (what SCRUM-9's e2e job will consume) — 7 days |
+| `todo-release-images-<KEY>-<sha>` | the two OCI archives (consumed by `sbom`, `scan`, `e2e-release` and `publish`) — 7 days |
+| `todo-release-e2e-<KEY>-<sha>-reports` | pre-release e2e (SCRUM-9-AC-12): Playwright `compose/` HTML, JUnit, JSON, traces/screenshots/videos of failed or retried tests; `release-images.json` (digest chain); `compose-ps.txt`, `compose-logs.txt`, `compose-logs-before-down.txt` (lifecycle) — always uploaded, 30 days |
 | `todo-release-backend-…`, `todo-release-frontend-…` (+ `-reports`), `todo-release-tooling-…-reports` | jar/tarball/app SBOMs, test and coverage reports |
 
 Reading the run summary: `version` shows **DRY RUN**, the would-be release version, the build version, the tag plan,
 the guard result and the pre-existence table (GHCR rows are `unknown` before the first release: anonymous reads of a
 package that does not exist yet answer 403 — re-checked authoritatively in `publish`); `scan` shows the gate tables;
 `release-gate` shows the asset table with SHA-256s, image digests (local), SBOM counts, gate verdict and
-reproducibility results.
+reproducibility results; `e2e-release` shows the candidate-image table (digests, image IDs, store), the image
+checks, the e2e counts, the `@critical` verdict and flaky tests, and the lifecycle results.
+
+### 3.1 Pre-release e2e (SCRUM-9, ADR 0015)
+
+`e2e-release` (`needs: [version, images]`, parallel to `sbom`/`scan`, both modes) tests **the bytes that `publish`
+pushes**, not a rebuild:
+
+1. Downloads `todo-release-images-<KEY>-<sha>` and, per archive, asserts that its manifest digest equals the `images`
+   output (the digest scanned, SBOM'd and pushed), then `docker load`s it and tags it `ghcr.io/vinods21/todo-<svc>:<version>`
+   (`.github/scripts/release/e2e-images.sh load`).
+2. Starts `docker-compose.yml` with `TODO_BACKEND_IMAGE`/`TODO_FRONTEND_IMAGE`/`TODO_IMAGE_TAG=<version>` via
+   `up -d --no-build --pull never --wait --wait-timeout 240` (only `postgres:16-alpine` is pulled, in its own step).
+3. Asserts the digest chain (`e2e-images.sh assert-running`, after `up` and again after the lifecycle restarts):
+   running container `.Image` = local image ID = archive **config** digest (classic image store) or **manifest**
+   digest (containerd image store); archive manifest digest = published digest. The store is detected and recorded.
+4. Runs `verify-images.sh`, the **full** compose Playwright suite (`empty-state`, `http`, `ui`) with the candidate's
+   identity on a fresh volume, the `@critical` guard (`e2e-gate.mjs --tag critical --min 12`: ≥ 12 executed, all
+   passed, skipped counts as failure; passed-on-retry tests are named and raise a warning), `verify-lifecycle.sh`.
+5. Always: summary, diagnostics on failure, Compose logs, `docker compose down -v --remove-orphans`, artifact
+   `todo-release-e2e-<KEY>-<sha>-reports`.
+
+`release-gate` needs `e2e-release`; any result other than `success` (failure, cancelled, skipped) fails the gate, so
+`publish`/`verify` cannot run. Marking more tests `@critical` (or removing a tag) requires adjusting `--min` in
+`release.yml`.
+
+**Reproduce a pre-release e2e run locally** against the candidate archives (Docker ≥ 25, Node from
+`frontend/.nvmrc`, `gh` logged in; values from the run's `e2e-release` summary or `release-images.json`):
+
+```sh
+RUN=<run id>; KEY=<jira key>; SHA=<full sha>          # from the Release run
+git checkout "$SHA"
+gh run download "$RUN" --repo vinods21/todo -n "todo-release-images-$KEY-$SHA" -D images
+export IMAGE_BACKEND=ghcr.io/vinods21/todo-backend IMAGE_FRONTEND=ghcr.io/vinods21/todo-frontend
+export VERSION=<stamped version> BACKEND_DIGEST=<sha256:…> FRONTEND_DIGEST=<sha256:…>
+.github/scripts/release/e2e-images.sh load images
+export TODO_BACKEND_IMAGE=$IMAGE_BACKEND TODO_FRONTEND_IMAGE=$IMAGE_FRONTEND TODO_IMAGE_TAG=$VERSION
+export COMPOSE_PROFILES=app COMPOSE_PROJECT_NAME=todo-release-e2e
+docker compose pull postgres && docker compose up -d --no-build --pull never --wait
+.github/scripts/release/e2e-images.sh assert-running
+(cd e2e && npm ci && npx playwright install --with-deps --only-shell chromium \
+  && E2E_EXPECT_EMPTY_DB=1 E2E_JIRA_KEY=$KEY E2E_GIT_SHA=$SHA E2E_VERSION=$VERSION npx playwright test)
+node .github/scripts/release/e2e-gate.mjs --results e2e/reports/compose/results.json --tag critical --min 12
+docker compose down -v --remove-orphans
+```
+
+(Locally `retries` is 0; set `CI=1` to get the CI retry policy.)
 
 ## 4. What a release produces (SCRUM-8-AC-10, AC-13, AC-18, AC-26)
 
@@ -213,7 +261,7 @@ version exists.
 
 | Failed at (job `publish` step) | State that may exist | What to do |
 |---|---|---|
-| any job before `publish` (incl. `release-gate`) | **nothing** published | fix the cause (or wait for the DB mirror), re-run or re-dispatch — same version |
+| any job before `publish` (incl. `e2e-release`, `release-gate`) | **nothing** published | fix the cause (or wait for the DB mirror), re-run or re-dispatch — same version. **e2e failed → nothing published:** a real e2e failure is a product bug — fix forward and re-dispatch; a flake (Docker Hub, runner) — re-run the failed jobs (`gh run rerun <id> --failed`): `e2e-release` and `release-gate` re-test the same digests from the run's images artifact (7 days) |
 | 1–4 (download, re-verify, login, pre-existence) | nothing published | fix and re-dispatch — same version (unless step 4 found an existing item: then that version is burnt) |
 | 5 push immutable tags | some of `X.Y.Z`, `X.Y.Z-<id>` in GHCR; no tag, no release | version **burnt** → dispatch `version=X.Y.(Z+1)`; leave the pushed images (they are private until made public) |
 | 6–7 attestations | immutable image tags (+ some attestations) | burnt → next patch |

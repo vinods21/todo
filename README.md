@@ -332,8 +332,8 @@ dev-mode suites and a lifecycle/persistence script (clean `SIGTERM` stop, data k
 traces/screenshots/videos on failure, `docker compose logs`). Since SCRUM-8 every job stamps and checks the build
 version `X.Y.Z-<sha7>` from `identity`. The separate workflow **`Release`** (`.github/workflows/release.yml`) runs in
 parallel as a dry run: release tooling tests + shellcheck, `./mvnw verify` and the frontend gate again on the exact
-commit, images built once from the tested artefacts, SBOMs, Trivy scans and the vulnerability gate
-([Releases](#releases)).
+commit, images built once from the tested artefacts, SBOMs, Trivy scans, the vulnerability gate and the pre-release
+e2e gate against the exact release images (SCRUM-9, job `e2e-release`) ([Releases](#releases)).
 
 ## Traceability
 
