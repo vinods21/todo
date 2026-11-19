@@ -4,6 +4,9 @@
   Jira key in the build (`jira.issue` / `build.jira` / `X-Jira-Issue`, frontend `__JIRA_KEY__`) and in CI
   artifact names is no longer hard-coded per story but derived from the branch in CI; the workflow is named `CI`.
   All other conventions below remain in force.
+- **Amended by [ADR 0013](0013-versioning-and-release-process.md)** (SCRUM-8): the Maven `<version>` is
+  `${revision}` (placeholder `0.0.0-SNAPSHOT`); CI stamps a build version `X.Y.Z-<sha7>` and releases `X.Y.Z` from
+  Git tags, so `Implementation-Version` is the product/build version.
 - Date: 2026-11-17
 - Jira: [SCRUM-2](https://suranagivinod.atlassian.net/browse/SCRUM-2) — applies to all SCRUM-2 ACs/NFRs
 

@@ -1,0 +1,41 @@
+{
+  "SchemaVersion": 2,
+  "ArtifactName": "todo-backend-0.1.0-abc1234.cdx.json",
+  "ArtifactType": "cyclonedx",
+  "Results": [
+    {
+      "Target": "Java",
+      "Class": "lang-pkgs",
+      "Type": "jar",
+      "Vulnerabilities": [
+        {
+          "VulnerabilityID": "CVE-2026-11111",
+          "PkgName": "org.example:vulnerable-lib",
+          "InstalledVersion": "1.0.0",
+          "FixedVersion": "1.0.1",
+          "Status": "fixed",
+          "Severity": "HIGH",
+          "SeveritySource": "ghsa",
+          "Title": "synthetic fixable HIGH (test fixture)",
+          "PrimaryURL": "https://avd.aquasec.com/nvd/cve-2026-11111"
+        },
+        {
+          "VulnerabilityID": "CVE-2026-22222",
+          "PkgName": "org.example:unfixed-lib",
+          "InstalledVersion": "2.0.0",
+          "Status": "affected",
+          "Severity": "CRITICAL",
+          "Title": "synthetic unfixed CRITICAL (test fixture)"
+        },
+        {
+          "VulnerabilityID": "CVE-2026-33333",
+          "PkgName": "org.example:medium-lib",
+          "InstalledVersion": "3.0.0",
+          "FixedVersion": "3.0.1",
+          "Status": "fixed",
+          "Severity": "MEDIUM"
+        }
+      ]
+    }
+  ]
+}

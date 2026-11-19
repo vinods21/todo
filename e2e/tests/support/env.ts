@@ -12,5 +12,7 @@ export const env = {
   /** CI sets these to the identity of the build under test; locally they are read from /build-info.json. */
   expectedJiraKey: process.env.E2E_JIRA_KEY,
   expectedSha: process.env.E2E_GIT_SHA,
+  /** SCRUM-8-AC-04: CI sets the build version the images were stamped with. */
+  expectedVersion: process.env.E2E_VERSION,
   expectEmptyDb: process.env.E2E_EXPECT_EMPTY_DB === '1',
 } as const

@@ -25,3 +25,8 @@ Thumbs.db
 .env
 .env.*
 !.env.example
+
+# SCRUM-8: release tooling installs and local outputs (never committed)
+.github/tools/node_modules/
+.tools/
+reports/

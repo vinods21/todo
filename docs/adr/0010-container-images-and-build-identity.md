@@ -4,6 +4,11 @@
 - Date: 2026-11-18
 - Jira: [SCRUM-7](https://suranagivinod.atlassian.net/browse/SCRUM-7) — SCRUM-7-AC-01..AC-04, AC-22, NFR-01..NFR-07, NFR-12; open questions Q-03 (decided), Q-04 (decided), Q-01/Q-02 (deferred)
 - Extends: [ADR 0008](0008-ci-derived-build-identity.md) (build identity) and [ADR 0004](0004-traceability-conventions.md) (manifest/`build-info` entries) to container images
+- **Amended by [ADR 0013](0013-versioning-and-release-process.md)** (SCRUM-8): `VERSION` (default `0.0.0-SNAPSHOT`)
+  is the product/build version and also feeds `-Drevision` / `APP_VERSION` in the build stage; both Dockerfiles gain a
+  `prebuilt` mode (`JAR_SOURCE` / `DIST_SOURCE` + BuildKit named contexts) used by the `Release` workflow; label
+  `org.opencontainers.image.base.name` added; CI images also tagged with the build version. **Amended by
+  [ADR 0014](0014-vulnerability-scanning-policy.md)**: vulnerability scanning (SCRUM-7 Q-02) is done there.
 - Design: [SCRUM-7 design §3–§4](../architecture/SCRUM-7-design.md)
 
 ## Context
@@ -61,12 +66,21 @@ Docker can run the stack. Constraints:
 | Image | Build stage | Runtime stage |
 |---|---|---|
 | backend | `eclipse-temurin:21.0.13_9-jdk-noble` (glibc; has `curl`/`wget`, which the only-script Maven Wrapper needs to download Maven 3.9.11) | `eclipse-temurin:21.0.13_9-jre-alpine` (JRE only; busybox `wget` for the healthcheck) |
-| frontend | `node:22.23.4-alpine` (Node major = `frontend/.nvmrc`; satisfies `engines` `>=22.22.2 <23`) | `nginxinc/nginx-unprivileged:1.30.6-alpine3.24` (stable line; runs as UID 101, listens on 8080) |
+| frontend | `node:22.23.4-alpine` (Node major = `frontend/.nvmrc`; satisfies `engines` `>=22.22.2 <23`) | `nginx/nginx-unprivileged:1.30.6-alpine3.24` (stable line; runs as UID 101, listens on 8080) |
 | postgres (Compose) | — | `postgres:16-alpine` — unchanged, deliberately the **same tag as Testcontainers** in the backend tests so the e2e and integration databases match; bump both together |
 
 - Tags only, **no digests** (Q-04): digests without automated update tooling (Dependabot/Renovate `docker`
   ecosystem) rot silently; follow-up story together with Q-01/Q-02.
 - Bumping a base image is a deliberate change to the Dockerfile and this table.
+- **SCRUM-8 (2026-11-18):** frontend runtime moved from `nginxinc/nginx-unprivileged:1.30.6-alpine3.24` to
+  `nginx/nginx-unprivileged:1.30.6-alpine3.24` — same nginx version and Alpine line, the Docker Hub repository
+  upstream (GitHub `nginx/docker-nginx-unprivileged`, formerly `nginxinc/`) publishes to since stable 1.30.6 /
+  mainline 1.31.7 (upstream commits `5ac28c4` "CI: log in to Docker Hub via OIDC connection … pushed to
+  hub.docker.com/r/nginx/nginx-unprivileged" and `c6a0f96` README, 2026-10-13; Docker Hub credentials for
+  `nginxinc/` removed in `679834d`, 2026-10-22). `nginxinc/` is no longer rebuilt; its Alpine packages had fixable
+  CRITICAL/HIGH CVEs found by the new release gate (ADR 0014, Release run 44362670868). Keep
+  `org.opencontainers.image.base.name` in the Dockerfile in sync with every bump (asserted by
+  `verify-release-images.sh`).
 
 ### Image structure
 

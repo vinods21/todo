@@ -1,0 +1,17 @@
+#!/usr/bin/env bash
+# Test stub for `skopeo inspect --raw docker://<ref>` (SCRUM-8-AC-08 tests).
+# STUB_GHCR_EXISTS: space-separated refs that exist; STUB_GHCR_MODE: absent (default) | denied | network.
+set -euo pipefail
+ref="${3#docker://}"
+for r in ${STUB_GHCR_EXISTS:-}; do
+  if [ "$r" = "$ref" ]; then
+    echo '{"schemaVersion":2,"mediaType":"application/vnd.oci.image.manifest.v1+json"}'
+    exit 0
+  fi
+done
+case "${STUB_GHCR_MODE:-absent}" in
+  absent) echo "time=x level=fatal msg=\"Error parsing image name: reading manifest: manifest unknown\"" >&2 ;;
+  denied) echo "time=x level=fatal msg=\"reading manifest in ghcr.io: denied: requested access to the resource is denied\"" >&2 ;;
+  *) echo "time=x level=fatal msg=\"dial tcp: i/o timeout\"" >&2 ;;
+esac
+exit 1

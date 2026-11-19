@@ -1,0 +1,15 @@
+{
+  "Version": "0.76.2",
+  "VulnerabilityDB": {
+    "Version": 2,
+    "NextUpdate": "2026-11-18T12:00:00Z",
+    "UpdatedAt": "2026-11-18T06:00:00Z",
+    "DownloadedAt": "2026-11-18T07:00:00Z"
+  },
+  "JavaDB": {
+    "Version": 1,
+    "NextUpdate": "2026-11-21T01:00:00Z",
+    "UpdatedAt": "2026-11-17T01:00:00Z",
+    "DownloadedAt": "2026-11-18T07:00:00Z"
+  }
+}

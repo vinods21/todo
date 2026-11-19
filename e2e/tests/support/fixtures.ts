@@ -70,15 +70,23 @@ export class TasksApi {
 export interface BuildIdentity {
   jira: string
   commit: string
+  /** SCRUM-8-AC-04, AC-27: product/build version (ADR 0013). */
+  version: string
 }
 
 /** CI passes the identity of the build under test; locally it is whatever /build-info.json of the frontend says. */
 export async function expectedIdentity(request: APIRequestContext): Promise<BuildIdentity> {
-  if (env.expectedJiraKey && env.expectedSha) return { jira: env.expectedJiraKey, commit: env.expectedSha }
+  if (env.expectedJiraKey && env.expectedSha && env.expectedVersion) {
+    return { jira: env.expectedJiraKey, commit: env.expectedSha, version: env.expectedVersion }
+  }
   const response = await request.get(`${env.baseURL}/build-info.json`)
   expect(response.status()).toBe(200)
   const info = (await response.json()) as BuildIdentity
-  return { jira: env.expectedJiraKey ?? info.jira, commit: env.expectedSha ?? info.commit }
+  return {
+    jira: env.expectedJiraKey ?? info.jira,
+    commit: env.expectedSha ?? info.commit,
+    version: env.expectedVersion ?? info.version,
+  }
 }
 
 // Chrome logs its own line for every deliberately provoked 4xx (e.g. the validation test, /favicon.ico).

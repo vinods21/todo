@@ -30,14 +30,16 @@ async function assetPaths(request: import('@playwright/test').APIRequestContext)
   return paths
 }
 
-test('SCRUM-7-AC-19, SCRUM-7-AC-04, SCRUM-7-AC-05: / serves index.html with the build identity and no-cache', async ({
+test('SCRUM-7-AC-19, SCRUM-7-AC-04, SCRUM-7-AC-05, SCRUM-8-AC-04: / serves index.html with the build identity and no-cache', async ({
   request,
 }) => {
   const identity = await expectedIdentity(request)
   const response = await request.get('/')
   const body = await response.text()
   expectHtmlIndex(response, body)
-  expect(body).toContain(`<meta name="build-info" content="${identity.jira} ${identity.commit}">`)
+  expect(body).toContain(
+    `<meta name="build-info" content="${identity.jira} ${identity.commit} ${identity.version}">`,
+  )
 })
 
 test('SCRUM-7-AC-05, SCRUM-7-AC-19: client-side routes loaded directly return index.html', async ({ request }) => {
@@ -72,14 +74,17 @@ test('SCRUM-7-AC-05, SCRUM-7-AC-19: a missing asset returns 404, not index.html'
   }
 })
 
-test('SCRUM-7-AC-04: /build-info.json carries the identity of the build', async ({ request }) => {
+test('SCRUM-7-AC-04, SCRUM-8-AC-04: /build-info.json carries the identity and version of the build', async ({
+  request,
+}) => {
   const response = await request.get('/build-info.json')
   expect(response.status()).toBe(200)
   expect(response.headers()['content-type']).toContain('application/json')
   const info = (await response.json()) as Record<string, string>
-  expect(Object.keys(info).sort()).toEqual(['branch', 'builtAt', 'commit', 'jira'])
+  expect(Object.keys(info).sort()).toEqual(['branch', 'builtAt', 'commit', 'jira', 'version'])
   if (env.expectedJiraKey) expect(info.jira).toBe(env.expectedJiraKey)
   if (env.expectedSha) expect(info.commit).toBe(env.expectedSha)
+  if (env.expectedVersion) expect(info.version).toBe(env.expectedVersion)
 })
 
 test('SCRUM-7-AC-06, SCRUM-7-AC-19: /actuator/health is proxied and UP; other actuator paths are not exposed via the frontend', async ({
@@ -151,13 +156,17 @@ test('SCRUM-7-AC-06, SCRUM-7-NFR-12: encoded, traversal and path-parameter varia
   }
 })
 
-test('SCRUM-7-AC-02, SCRUM-7-AC-19: backend /actuator/info reports the build identity', async ({ request }) => {
+test('SCRUM-7-AC-02, SCRUM-7-AC-19, SCRUM-8-AC-04: backend /actuator/info reports the build identity and version', async ({
+  request,
+}) => {
   const identity = await expectedIdentity(request)
   const response = await request.get(`${env.backendURL}/actuator/info`)
   expect(response.status()).toBe(200)
   const info = (await response.json()) as { build?: Record<string, string> }
   expect(info.build?.jira).toBe(identity.jira)
   expect(info.build?.['git-commit']).toBe(identity.commit)
+  // SCRUM-8-AC-04: one product version for backend and frontend (ADR 0013).
+  expect(info.build?.version).toBe(identity.version)
 })
 
 test('SCRUM-7-AC-06, SCRUM-7-AC-19: API round-trip through the proxy', async ({ request }) => {

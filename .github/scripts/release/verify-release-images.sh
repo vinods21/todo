@@ -1,0 +1,104 @@
+#!/usr/bin/env bash
+# SCRUM-8-AC-04, AC-14, AC-25 (design §6.2 images): the images built once from the tested artefacts carry the right
+# labels and exactly the tested payload. Usage: verify-release-images.sh <backend ref> <frontend ref> <in/backend> <in/frontend>
+# env: VERSION, SHA, JIRA_KEY, GITHUB_STEP_SUMMARY (optional). Images must be loaded into the Docker daemon.
+set -euo pipefail
+
+backend="$1"
+frontend="$2"
+in_backend="$3"
+in_frontend="$4"
+summary="${GITHUB_STEP_SUMMARY:-/dev/null}"
+failures=0
+fail() {
+  echo "::error::$*"
+  failures=$((failures + 1))
+}
+label() {
+  docker image inspect -f "{{ index .Config.Labels \"$2\" }}" "$1"
+}
+# base.name is a literal in each Dockerfile (AC-14): it must name the runtime (last) FROM, fully qualified.
+root="$(cd "$(dirname "$0")/../../.." && pwd)"
+runtime_base() { # <Dockerfile> → docker.io/<ns>/<repo>:<tag> of the last FROM
+  local ref
+  ref=$(awk 'toupper($1) == "FROM" { r = $2 } END { print r }' "$1")
+  case "$ref" in
+    */*) [[ "${ref%%/*}" == *[.:]* || "${ref%%/*}" == localhost ]] || ref="docker.io/$ref" ;;
+    *) ref="docker.io/library/$ref" ;;
+  esac
+  echo "$ref"
+}
+declare -A dockerfile=([backend]="$root/Dockerfile" [frontend]="$root/frontend/Dockerfile")
+work=$(mktemp -d)
+trap 'rm -rf "$work"' EXIT
+rows=()
+
+for svc in backend frontend; do
+  if [ "$svc" = backend ]; then img="$backend"; else img="$frontend"; fi
+  result=ok
+  for pair in "org.opencontainers.image.version=$VERSION" "org.opencontainers.image.revision=$SHA" \
+              "org.opencontainers.image.source=https://github.com/vinods21/todo" "com.vinods21.todo.jira=$JIRA_KEY"; do
+    k="${pair%%=*}"
+    want="${pair#*=}"
+    got=$(label "$img" "$k")
+    [ "$got" = "$want" ] || { fail "$svc: label $k='$got', expected '$want'"; result=FAIL; }
+  done
+  for k in org.opencontainers.image.created org.opencontainers.image.base.name org.opencontainers.image.title; do
+    got=$(label "$img" "$k")
+    if [ -z "$got" ] || [ "$got" = "<no value>" ] || [ "$got" = UNKNOWN ]; then fail "$svc: label $k is empty/UNKNOWN"; result=FAIL; fi
+  done
+  want_base=$(runtime_base "${dockerfile[$svc]}")
+  got_base=$(label "$img" org.opencontainers.image.base.name)
+  [ "$got_base" = "$want_base" ] || { fail "$svc: label org.opencontainers.image.base.name='$got_base', runtime FROM is '$want_base' (SCRUM-8-AC-14)"; result=FAIL; }
+  user=$(docker image inspect -f '{{ .Config.User }}' "$img")
+  [[ "${user%%:*}" =~ ^[1-9][0-9]*$ ]] || { fail "$svc: image user '$user' is not a non-root UID"; result=FAIL; }
+
+  cid=$(docker create "$img")
+  if [ "$svc" = backend ]; then
+    docker cp "$cid:/app/app.jar" "$work/app.jar" >/dev/null
+    a=$(sha256sum "$work/app.jar" | cut -d' ' -f1)
+    b=$(sha256sum "$in_backend/todo-backend-${VERSION}.jar" | cut -d' ' -f1)
+    [ "$a" = "$b" ] || { fail "backend: /app/app.jar ($a) is not the tested jar ($b) — build once violated (AC-25)"; result=FAIL; }
+    payload="app.jar = tested jar \`${a:0:12}\`"
+  else
+    mkdir -p "$work/dist" "$work/html"
+    tar -xzf "$in_frontend/todo-frontend-${VERSION}.tar.gz" -C "$work/dist"
+    docker cp "$cid:/usr/share/nginx/html/." "$work/html" >/dev/null
+    # Every file of the tested bundle must be in the image byte-for-byte; the base image's own files (50x.html) may
+    # remain next to them (as in the source-mode image, SCRUM-7).
+    files=0
+    mismatched=0
+    while IFS= read -r -d '' f; do
+      rel="${f#"$work/dist/"}"
+      files=$((files + 1))
+      if ! cmp -s "$f" "$work/html/$rel"; then
+        mismatched=$((mismatched + 1))
+        echo "differs or missing in image: $rel"
+      fi
+    done < <(find "$work/dist" -type f -print0)
+    extras=$(cd "$work/html" && find . -type f | sed 's|^\./||' | while read -r x; do [ -e "$work/dist/$x" ] || echo "$x"; done | tr '\n' ' ')
+    if [ "$mismatched" -eq 0 ] && [ "$files" -gt 0 ]; then
+      payload="html/ ⊇ tested bundle ($files files identical; base-image extras: ${extras:-none})"
+    else
+      fail "frontend: $mismatched of $files bundle files differ or are missing in /usr/share/nginx/html (AC-25)"
+      result=FAIL
+      payload="differs"
+    fi
+    v=$(jq -r .version "$work/html/build-info.json")
+    [ "$v" = "$VERSION" ] || { fail "frontend: build-info.json version '$v' != $VERSION"; result=FAIL; }
+  fi
+  docker rm "$cid" >/dev/null
+  bytes=$(docker image inspect -f '{{ .Size }}' "$img")
+  rows+=("| $svc | \`$img\` | \`$(label "$img" org.opencontainers.image.version)\` | \`$(label "$img" org.opencontainers.image.base.name)\` | \`$user\` | $(( (bytes + 524288) / 1048576 )) MB | $payload | $result |")
+done
+
+{
+  echo "### Release images (SCRUM-8-AC-04, AC-14, AC-25)"
+  echo
+  echo "| image | ref | version label | base | user | size (uncompressed) | payload | result |"
+  echo "|---|---|---|---|---|---|---|---|"
+  printf '%s\n' "${rows[@]}"
+  echo
+} | tee -a "$summary"
+[ "$failures" -eq 0 ] || { echo "$failures check(s) failed"; exit 1; }
+echo "release image checks passed"
