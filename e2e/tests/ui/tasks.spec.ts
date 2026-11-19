@@ -22,7 +22,7 @@ function apiResponse(page: Page, method: string, path: RegExp) {
   )
 }
 
-test('SCRUM-7-AC-18, SCRUM-7-AC-21: the task list loads with the tasks from the backend', { tag: '@dev-smoke' }, async ({
+test('SCRUM-7-AC-18, SCRUM-7-AC-21: the task list loads with the tasks from the backend', { tag: ['@dev-smoke', '@critical'] }, async ({
   page,
   api,
 }) => {
@@ -34,7 +34,7 @@ test('SCRUM-7-AC-18, SCRUM-7-AC-21: the task list loads with the tasks from the 
   await expect(firstRow(page)).toContainText(title)
 })
 
-test('SCRUM-7-AC-18, SCRUM-7-AC-21: a task created via the form appears first in the list', { tag: '@dev-smoke' }, async ({
+test('SCRUM-7-AC-18, SCRUM-7-AC-21: a task created via the form appears first in the list', { tag: ['@dev-smoke', '@critical'] }, async ({
   page,
 }) => {
   const title = uniqueTitle('created via form')
@@ -54,7 +54,7 @@ test('SCRUM-7-AC-18, SCRUM-7-AC-21: a task created via the form appears first in
   await expect(firstRow(page)).toContainText('2026-12-24')
 })
 
-test('SCRUM-7-AC-18: editing title, description and due date is shown in the list; the edit deep link survives a reload', async ({
+test('SCRUM-7-AC-18: editing title, description and due date is shown in the list; the edit deep link survives a reload', { tag: '@critical' }, async ({
   page,
   api,
 }) => {
@@ -88,7 +88,7 @@ test('SCRUM-7-AC-18: editing title, description and due date is shown in the lis
   expect(stored).toMatchObject({ title: newTitle, description: 'after', dueDate: '2027-01-15' })
 })
 
-test('SCRUM-7-AC-18, SCRUM-7-AC-21: a status changed from the list row is shown and persists after a reload', { tag: '@dev-smoke' }, async ({
+test('SCRUM-7-AC-18, SCRUM-7-AC-21: a status changed from the list row is shown and persists after a reload', { tag: ['@dev-smoke', '@critical'] }, async ({
   page,
   api,
 }) => {
@@ -109,7 +109,7 @@ test('SCRUM-7-AC-18, SCRUM-7-AC-21: a status changed from the list row is shown 
   expect((await api.get(task.id)).status).toBe('DONE')
 })
 
-test('SCRUM-7-AC-18: filtering by status shows only matching tasks, keeps ?status= in the URL and survives a refresh', async ({
+test('SCRUM-7-AC-18: filtering by status shows only matching tasks, keeps ?status= in the URL and survives a refresh', { tag: '@critical' }, async ({
   page,
   api,
 }) => {
@@ -141,7 +141,7 @@ test('SCRUM-7-AC-18: filtering by status shows only matching tasks, keeps ?statu
   await assertFiltered()
 })
 
-test('SCRUM-7-AC-18, SCRUM-7-AC-06: a backend validation error is shown in the form', async ({ page }) => {
+test('SCRUM-7-AC-18, SCRUM-7-AC-06: a backend validation error is shown in the form', { tag: '@critical' }, async ({ page }) => {
   // The only interception (ADR 0012): the outgoing create request's title is rewritten to blanks to bypass the
   // client-side check; the response is the backend's real 400 ApiError through the proxy.
   await page.route('**/api/tasks', async (route) => {
@@ -166,7 +166,7 @@ test('SCRUM-7-AC-18, SCRUM-7-AC-06: a backend validation error is shown in the f
   await expect(page).toHaveURL(/\/tasks\/new$/)
 })
 
-test('SCRUM-7-AC-18: the footer shows the build identity of the build under test', async ({ page, request }) => {
+test('SCRUM-7-AC-18: the footer shows the build identity of the build under test', { tag: '@critical' }, async ({ page, request }) => {
   const identity = await expectedIdentity(request)
   await page.goto('/')
   await expect(page.getByRole('contentinfo')).toHaveText(`${identity.jira} · ${identity.commit.slice(0, 7)}`)

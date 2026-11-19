@@ -30,7 +30,7 @@ async function assetPaths(request: import('@playwright/test').APIRequestContext)
   return paths
 }
 
-test('SCRUM-7-AC-19, SCRUM-7-AC-04, SCRUM-7-AC-05, SCRUM-8-AC-04: / serves index.html with the build identity and no-cache', async ({
+test('SCRUM-7-AC-19, SCRUM-7-AC-04, SCRUM-7-AC-05, SCRUM-8-AC-04: / serves index.html with the build identity and no-cache', { tag: '@critical' }, async ({
   request,
 }) => {
   const identity = await expectedIdentity(request)
@@ -74,7 +74,7 @@ test('SCRUM-7-AC-05, SCRUM-7-AC-19: a missing asset returns 404, not index.html'
   }
 })
 
-test('SCRUM-7-AC-04, SCRUM-8-AC-04: /build-info.json carries the identity and version of the build', async ({
+test('SCRUM-7-AC-04, SCRUM-8-AC-04: /build-info.json carries the identity and version of the build', { tag: '@critical' }, async ({
   request,
 }) => {
   const response = await request.get('/build-info.json')
@@ -156,7 +156,7 @@ test('SCRUM-7-AC-06, SCRUM-7-NFR-12: encoded, traversal and path-parameter varia
   }
 })
 
-test('SCRUM-7-AC-02, SCRUM-7-AC-19, SCRUM-8-AC-04: backend /actuator/info reports the build identity and version', async ({
+test('SCRUM-7-AC-02, SCRUM-7-AC-19, SCRUM-8-AC-04: backend /actuator/info reports the build identity and version', { tag: '@critical' }, async ({
   request,
 }) => {
   const identity = await expectedIdentity(request)
@@ -169,7 +169,7 @@ test('SCRUM-7-AC-02, SCRUM-7-AC-19, SCRUM-8-AC-04: backend /actuator/info report
   expect(info.build?.version).toBe(identity.version)
 })
 
-test('SCRUM-7-AC-06, SCRUM-7-AC-19: API round-trip through the proxy', async ({ request }) => {
+test('SCRUM-7-AC-06, SCRUM-7-AC-19: API round-trip through the proxy', { tag: '@critical' }, async ({ request }) => {
   const created = await request.post('/api/tasks', { data: { title: uniqueTitle('http round-trip') } })
   expect(created.status()).toBe(201)
   const task = (await created.json()) as Task
