@@ -92,3 +92,14 @@ runner's Docker Engine uses.
 - `@critical` is part of the test contract: removing the tag from a test, or adding critical tests, requires updating
   `--min` in `release.yml` (deliberate, reviewed).
 - The CI `e2e` job stays (source-mode Dockerfile path, hadolint, dev-mode smoke, fast feedback — SCRUM-9 Q-02).
+
+## Implementation notes (Dev, SCRUM-9)
+
+- Observed on `ubuntu-latest` (Docker Engine 29.4.2, Nov 2026): **containerd image store**. `docker load` of the BuildKit
+  OCI archive keeps the manifest, so `Image.Id` = running container `.Image` = the archive manifest digest = the digest
+  `publish` pushes. The classic-store rule (config digest) and the `skopeo` fallback stay in `e2e-images.sh` for other
+  runners; the store is recorded per run in `release-images.json`.
+- The gate's first run found a real defect: the `Release` `frontend` job built the bundle without the same-origin API
+  base (`VITE_API_BASE_URL=/`, ADR 0011) that the Dockerfile `source` stage sets, so the released frontend image called
+  `http://localhost:8080` and was blocked by its own CSP. Fixed in the workflow (`release.yml` job `frontend`); the
+  frontend image of `v1.0.0` is affected (follow-up).
