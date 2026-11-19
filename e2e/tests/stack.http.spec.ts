@@ -170,8 +170,6 @@ test('SCRUM-7-AC-02, SCRUM-7-AC-19, SCRUM-8-AC-04: backend /actuator/info report
 })
 
 test('SCRUM-7-AC-06, SCRUM-7-AC-19: API round-trip through the proxy', { tag: '@critical' }, async ({ request }) => {
-  // TEMP (SCRUM-9-AC-11, reverted in the next commit): deliberate failure of one @critical test in e2e-release only.
-  expect(process.env.E2E_AC11_FAIL, 'SCRUM-9-AC-11 TEMP: deliberate red dry-run').toBeUndefined()
   const created = await request.post('/api/tasks', { data: { title: uniqueTitle('http round-trip') } })
   expect(created.status()).toBe(201)
   const task = (await created.json()) as Task
