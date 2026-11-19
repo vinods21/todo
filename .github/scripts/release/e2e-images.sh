@@ -31,13 +31,18 @@ need() {
 
 detect_store() {
   # The containerd image store reports the snapshotter as driver-type; the classic store reports graph drivers.
-  local status # captured first: `docker info | grep -q` could SIGPIPE docker and, with pipefail, misreport the store
+  # Fail closed (design R2): a store that is neither is never guessed, so the image-ID rule is never assumed.
+  local status driver # captured first: `docker info | grep -q` could SIGPIPE docker and, with pipefail, misreport
   status=$(docker info -f '{{ json .DriverStatus }}')
+  driver=$(docker info -f '{{ .Driver }}')
   if [[ "$status" == *io.containerd.snapshotter* ]]; then
     echo containerd
-  else
-    echo classic
+    return
   fi
+  case "$driver" in
+    overlay2 | fuse-overlayfs | btrfs | zfs | vfs | devicemapper | aufs) echo classic ;;
+    *) die "SCRUM-9-AC-04: unknown Docker image store (driver '$driver', DriverStatus $status) — refusing to guess the image-ID rule" ;;
+  esac
 }
 
 blob_sha() { # <archive> <sha256:…> → sha256:<hash of the blob bytes>

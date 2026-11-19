@@ -102,4 +102,7 @@ runner's Docker Engine uses.
 - The gate's first run found a real defect: the `Release` `frontend` job built the bundle without the same-origin API
   base (`VITE_API_BASE_URL=/`, ADR 0011) that the Dockerfile `source` stage sets, so the released frontend image called
   `http://localhost:8080` and was blocked by its own CSP. Fixed in the workflow (`release.yml` job `frontend`); the
-  frontend image of `v1.0.0` is affected (follow-up).
+  frontend image of `v1.0.0` is affected (follow-up). Review: `v1.0.0` itself was created outside the pipeline (manual
+  pre-release, no assets, no `Release` dispatch run), so no pipeline-pushed `1.0.0` image exists; any pipeline-built
+  `v1.0.0` frontend image is affected — known issue and remedy (`v1.0.1`) in
+  [RELEASE.md §10](../release/RELEASE.md#10-known-issues).

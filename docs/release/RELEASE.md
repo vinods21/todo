@@ -8,6 +8,9 @@
 | Workflow | [`.github/workflows/release.yml`](../../.github/workflows/release.yml) (name **Release**) |
 | Related | [ROLLBACK.md](ROLLBACK.md) · [vulnerability-policy.md](vulnerability-policy.md) |
 
+> **Known issue — `v1.0.0`:** do not run the Compose stack with `todo-frontend` images built by the `Release` pipeline
+> at `v1.0.0`; cut **`v1.0.1`** after the SCRUM-9 merge. Details: [§10](#10-known-issues).
+
 ## 1. Versioning (SCRUM-8-AC-01..AC-03, AC-05)
 
 **One product version** `MAJOR.MINOR.PATCH` ([SemVer 2.0.0](https://semver.org)) for the backend jar, the frontend
@@ -134,7 +137,8 @@ pushes**, not a rebuild:
    `up -d --no-build --pull never --wait --wait-timeout 240` (only `postgres:16-alpine` is pulled, in its own step).
 3. Asserts the digest chain (`e2e-images.sh assert-running`, after `up` and again after the lifecycle restarts):
    running container `.Image` = local image ID = archive **config** digest (classic image store) or **manifest**
-   digest (containerd image store); archive manifest digest = published digest. The store is detected and recorded.
+   digest (containerd image store); archive manifest digest = published digest. The store is detected and recorded;
+   any other store fails the job (never guessed).
 4. Runs `verify-images.sh`, the **full** compose Playwright suite (`empty-state`, `http`, `ui`) with the candidate's
    identity on a fresh volume, the `@critical` guard (`e2e-gate.mjs --tag critical --min 12`: ≥ 12 executed, all
    passed, skipped counts as failure; passed-on-retry tests are named and raise a warning), `verify-lifecycle.sh`.
@@ -320,3 +324,34 @@ Done once by the repository owner (or by the Dev agent with owner approval) afte
 7. Record the evidence in [`docs/traceability/SCRUM-8.md`](../traceability/SCRUM-8.md) ("First release" line): run
    id, commit SHA, tag, release URL, both image digests, `gh attestation verify` and `sha256sum -c` output, settings
    applied — in a follow-up commit (or a Jira comment on SCRUM-8 if direct commits to `main` are not allowed).
+
+## 10. Known issues
+
+### `v1.0.0` — prebuilt frontend bundle calls `http://localhost:8080` (found by SCRUM-9)
+
+**Defect.** Up to and including `v1.0.0` (`8beb5aa`), the `Release` job `frontend` ran `npm run build` without
+`VITE_API_BASE_URL=/`, which the Dockerfile `source` stage sets (ADR 0011, SCRUM-7-AC-17). Vite therefore inlined the
+dev default `http://localhost:8080`, and the `todo-frontend` image packaged from that bundle (`DIST_SOURCE=prebuilt`)
+cannot reach the API: its own CSP (`connect-src 'self'`) blocks every `/api` call, so the task list never loads. The
+first `e2e-release` run ([44595056165](https://github.com/vinods21/todo/actions/runs/44595056165)) caught it; fixed in
+`69180b4` (SCRUM-9). The backend image and images built from source (`docker build frontend`, CI, local Compose) are
+not affected.
+
+**State of `v1.0.0`** (checked 2026-11-20 via the REST API): tag `v1.0.0` → `8beb5aa` (lightweight), GitHub Release
+`v1.0.0` published 2026-11-19T18:46Z as a **pre-release with no assets** and auto-generated notes; the `Release`
+workflow has no `workflow_dispatch` run, so `publish` never pushed `1.0.0` images, SBOMs or attestations. Any
+`todo-frontend` image or `todo-frontend-1.0.0*.tar.gz` built by the `Release` pipeline at that commit (e.g. dry-run
+`todo-release-images-*` artifacts), or pushed by hand as `1.0.0` / `1.0` / `latest`, carries the defect.
+
+**Remedy.**
+
+1. **Do not use `v1.0.0` pipeline-built frontend images for the Compose stack.** To run `v1.0.0`, build from source
+   (`git checkout v1.0.0 && docker compose --profile app up --build`) — or use `v1.0.1` once released.
+2. After the SCRUM-9 PR is merged, cut **`v1.0.1`** (`gh workflow run release.yml --ref main -f bump=patch
+   -f dry_run=false`); `e2e-release` now proves the UI works against the exact images before anything is published.
+   Do **not** touch the `v1.0.0` tag or release (§8: never delete or move a `v*` tag); optionally prefix the `v1.0.0`
+   notes with "⚠ Do not use the prebuilt frontend image, use v1.0.1" ([ROLLBACK.md §6](ROLLBACK.md#6-withdrawing-a-bad-release)).
+3. **Watch the pre-existence check of the `v1.0.1` run.** Because a `v*` tag and a release now exist, step 4 of
+   `publish` no longer treats a GHCR `403/denied` answer as "absent" (that exception applies only before the first
+   release, §9 step 5). If the GHCR packages do not exist yet and the check refuses with `unknown … denied`, nothing has
+   been published (the version is not burnt): create the packages / fix access, then re-dispatch the same version.

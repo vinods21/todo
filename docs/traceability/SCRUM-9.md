@@ -65,7 +65,10 @@ Deviations from the design:
    blocked by the image CSP (`connect-src 'self'`): since SCRUM-8 the `Release` bundle was built without the same-origin
    base that the Dockerfile `source` stage sets (ADR 0011). Workflow-only fix; no application or Dockerfile change.
    **Consequence:** the frontend image of the already published `v1.0.0` (SCRUM-8) carries this defect — follow-up needed
-   (warn in release notes / ship `v1.0.1`, ROLLBACK.md §6).
+   (warn in release notes / ship `v1.0.1`, ROLLBACK.md §6). Review correction: `v1.0.0` is a manual GitHub pre-release
+   (lightweight tag on `8beb5aa`, no assets, no `Release` `workflow_dispatch` run) — the pipeline never pushed `1.0.0`
+   images; every pipeline-built `v1.0.0` frontend image would carry the defect. Known issue + remedy:
+   [RELEASE.md §10](../release/RELEASE.md#10-known-issues).
 2. Store: the runner uses the **containerd** image store, so the chain is `Image.Id` = manifest digest = published digest
    (design §5.1 rule for containerd); the classic-store path (config digest) and the `skopeo` fallback were exercised only
    with a local stub.
