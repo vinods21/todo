@@ -257,7 +257,13 @@ jobs:
       - name: Test with coverage gate (SCRUM-8-AC-07)
         run: npm run test:coverage
 
-      - name: Build
+      # SCRUM-9 (found by e2e-release, run 44595056165): the bundle packaged into the image must be built like the
+      # Dockerfile `source` stage — same-origin API base (ADR 0011, SCRUM-7-AC-17: `ENV VITE_API_BASE_URL=/`).
+      # Without it Vite inlines the dev default http://localhost:8080, which the image's CSP (connect-src 'self')
+      # blocks. Step-level only: unit tests keep their default.
+      - name: Build (same-origin API base, as the Dockerfile source stage)
+        env:
+          VITE_API_BASE_URL: /
         run: npm run build
 
       - name: Verify version and identity (SCRUM-8-AC-04)
@@ -284,6 +290,8 @@ jobs:
 
       - name: Reproducibility check — report only (SCRUM-8-NFR-03)
         id: repro
+        env:
+          VITE_API_BASE_URL: / # same inputs as the Build step
         run: |
           mv dist dist-first
           npm run build > /dev/null
