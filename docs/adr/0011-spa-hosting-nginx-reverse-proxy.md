@@ -25,7 +25,7 @@ the dev origin via CORS. Options:
 
 Option **A** (confirms A-01).
 
-- **Image:** `nginx/nginx-unprivileged:1.30.6-alpine3.24` (ADR 0010), listening on container port **8080**,
+- **Image:** `nginx/nginx-unprivileged:1.30.7-alpine3.24` (ADR 0010), listening on container port **8080**,
   UID 101. Config is an envsubst template `frontend/nginx/default.conf.template` rendered by the image's
   entrypoint into `/etc/nginx/conf.d/default.conf` (overwriting the base image's default server) with
   `NGINX_ENVSUBST_FILTER=^(BACKEND_URL|NGINX_LOCAL_RESOLVERS)$` so nginx's own `$variables` are never touched.

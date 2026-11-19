@@ -9,6 +9,8 @@
   `prebuilt` mode (`JAR_SOURCE` / `DIST_SOURCE` + BuildKit named contexts) used by the `Release` workflow; label
   `org.opencontainers.image.base.name` added; CI images also tagged with the build version. **Amended by
   [ADR 0014](0014-vulnerability-scanning-policy.md)**: vulnerability scanning (SCRUM-7 Q-02) is done there.
+  **Amended by [SCRUM-10](https://suranagivinod.atlassian.net/browse/SCRUM-10)**: frontend runtime base image
+  bumped to nginx-unprivileged 1.30.7 (see the SCRUM-10 note under "Base images").
 - Design: [SCRUM-7 design §3–§4](../architecture/SCRUM-7-design.md)
 
 ## Context
@@ -66,7 +68,7 @@ Docker can run the stack. Constraints:
 | Image | Build stage | Runtime stage |
 |---|---|---|
 | backend | `eclipse-temurin:21.0.13_9-jdk-noble` (glibc; has `curl`/`wget`, which the only-script Maven Wrapper needs to download Maven 3.9.11) | `eclipse-temurin:21.0.13_9-jre-alpine` (JRE only; busybox `wget` for the healthcheck) |
-| frontend | `node:22.23.4-alpine` (Node major = `frontend/.nvmrc`; satisfies `engines` `>=22.22.2 <23`) | `nginx/nginx-unprivileged:1.30.6-alpine3.24` (stable line; runs as UID 101, listens on 8080) |
+| frontend | `node:22.23.4-alpine` (Node major = `frontend/.nvmrc`; satisfies `engines` `>=22.22.2 <23`) | `nginx/nginx-unprivileged:1.30.7-alpine3.24` (stable line; runs as UID 101, listens on 8080) |
 | postgres (Compose) | — | `postgres:16-alpine` — unchanged, deliberately the **same tag as Testcontainers** in the backend tests so the e2e and integration databases match; bump both together |
 
 - Tags only, **no digests** (Q-04): digests without automated update tooling (Dependabot/Renovate `docker`
@@ -81,6 +83,13 @@ Docker can run the stack. Constraints:
   CRITICAL/HIGH CVEs found by the new release gate (ADR 0014, Release run 44362670868). Keep
   `org.opencontainers.image.base.name` in the Dockerfile in sync with every bump (asserted by
   `verify-release-images.sh`).
+- **SCRUM-10 (2026-11-19):** frontend runtime bumped from `nginx/nginx-unprivileged:1.30.6-alpine3.24` to
+  `nginx/nginx-unprivileged:1.30.7-alpine3.24` — same repository and Alpine line (3.24), nginx stable patch release.
+  Clears the fixable HIGH CVE-2026-113425, CVE-2026-121810, CVE-2026-123007, CVE-2026-123633 and CVE-2026-123634
+  (Alpine package `nginx` 1.30.6-r1 → 1.30.7-r1) that blocked the release gate in Release run 44475812645. Upstream
+  provenance: `nginx/docker-nginx-unprivileged` commits `bef9cb1` (`update.sh`: stable → 1.30.7) and `95b8382`
+  (regenerated Dockerfiles), 2026-11-18. See [SCRUM-10 requirements](../requirements/SCRUM-10.md) and
+  [design](../architecture/SCRUM-10-design.md); evidence in [the SCRUM-10 matrix](../traceability/SCRUM-10.md).
 
 ### Image structure
 
