@@ -707,6 +707,7 @@ jobs:
           E2E_JIRA_KEY: ${{ env.JIRA_KEY }}
           E2E_GIT_SHA: ${{ env.SHA }}
           E2E_VERSION: ${{ env.VERSION }}
+          E2E_AC11_FAIL: "1" # TEMP (SCRUM-9-AC-11): makes one @critical test fail; reverted in the next commit
         run: npx playwright test # all compose projects (empty-state, http, ui); retries: 1 on CI (config)
 
       - name: Critical To-Do workflows passed; flaky tests reported (SCRUM-9-AC-07, AC-09)
