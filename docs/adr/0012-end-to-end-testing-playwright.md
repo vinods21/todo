@@ -8,6 +8,9 @@
   E2E (Playwright) stays out of scope" are replaced: SCRUM-1-AC-14 is now automated (AC-21), and the MSW-vs-real-API
   drift risk it lists is covered by the e2e suite. The rest of ADR 0007 (unit/component layer) is unchanged.
 - Design: [SCRUM-7 design §8–§9](../architecture/SCRUM-7-design.md)
+- **Amended by:** [ADR 0015](0015-pre-release-e2e-gate.md) (SCRUM-9) — the compose suite also runs in workflow
+  `Release` (job `e2e-release`) against the exact release-candidate images and gates publication; critical specs are
+  tagged `@critical`; the CI job's Playwright install and teardown/report steps live in shared composite actions.
 
 ## Context
 

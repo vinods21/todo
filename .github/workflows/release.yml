@@ -3,7 +3,7 @@
 #   DRY RUN: push (feature/**, main), pull_request, or dispatch with dry_run=true → everything up to `release-gate`;
 #            no tag, no image push, no release, no attestation (SCRUM-8-AC-11). Read-only token everywhere.
 # Build once (SCRUM-8-AC-25): `backend`/`frontend` produce the tested jar/tarball; `images` packages exactly those bytes
-# into OCI archives; `sbom`, `scan`, (SCRUM-9 e2e) and `publish` all use the same archives and files.
+# into OCI archives; `sbom`, `scan`, `e2e-release` (SCRUM-9, ADR 0015) and `publish` all use the same archives and files.
 # Every action is pinned to a full commit SHA (NFR-02, design §6.4); downloaded CLIs are pinned + checksum-verified in
 # .github/scripts/release/install-tools.sh. Untrusted values (branch names, dispatch inputs) reach scripts via env only.
 name: Release
@@ -257,7 +257,13 @@ jobs:
       - name: Test with coverage gate (SCRUM-8-AC-07)
         run: npm run test:coverage
 
-      - name: Build
+      # SCRUM-9 (found by e2e-release, run 44595056165): the bundle packaged into the image must be built like the
+      # Dockerfile `source` stage — same-origin API base (ADR 0011, SCRUM-7-AC-17: `ENV VITE_API_BASE_URL=/`).
+      # Without it Vite inlines the dev default http://localhost:8080, which the image's CSP (connect-src 'self')
+      # blocks. Step-level only: unit tests keep their default.
+      - name: Build (same-origin API base, as the Dockerfile source stage)
+        env:
+          VITE_API_BASE_URL: /
         run: npm run build
 
       - name: Verify version and identity (SCRUM-8-AC-04)
@@ -284,6 +290,8 @@ jobs:
 
       - name: Reproducibility check — report only (SCRUM-8-NFR-03)
         id: repro
+        env:
+          VITE_API_BASE_URL: / # same inputs as the Build step
         run: |
           mv dist dist-first
           npm run build > /dev/null
@@ -622,15 +630,134 @@ jobs:
           sarif_file: scan/${{ matrix.target }}.sarif
           category: trivy-${{ matrix.target }}
 
+  # SCRUM-9 (ADR 0015, design §4): e2e against the EXACT release candidate — the OCI archives `publish` will push
+  # (same digests, loaded into the local daemon; no rebuild, no pull, no registry login). Both modes, same steps;
+  # parallel to `sbom`/`scan`. Gate input of `release-gate` (SCRUM-9-AC-10): nothing is published unless it succeeded.
+  # Read-only token, no secrets (NFR-02); only action SHAs already pinned above (NFR-03).
+  e2e-release: # SCRUM-9-AC-01..AC-15
+    needs: [version, images]
+    runs-on: ubuntu-latest
+    timeout-minutes: 20 # SCRUM-9-NFR-01 (same as CI `e2e`)
+    env:
+      MODE: ${{ needs.version.outputs.mode }}
+      VERSION: ${{ needs.version.outputs.version }} # stamped: X.Y.Z (release) | X.Y.Z-<id> (dry-run)
+      JIRA_KEY: ${{ needs.version.outputs.jira_key }}
+      SHA: ${{ needs.version.outputs.sha }}
+      GIT_COMMIT: ${{ needs.version.outputs.sha }} # verify-images.sh: org.opencontainers.image.revision
+      BACKEND_DIGEST: ${{ needs.images.outputs.backend_digest }}
+      FRONTEND_DIGEST: ${{ needs.images.outputs.frontend_digest }}
+      COMPOSE_PROFILES: app
+      COMPOSE_PROJECT_NAME: todo-release-e2e
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ needs.version.outputs.sha }}
+          persist-credentials: false
+
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version-file: frontend/.nvmrc
+          cache: npm
+          cache-dependency-path: e2e/package-lock.json
+
+      - name: Download the release-candidate OCI archives (SCRUM-9-AC-03)
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: todo-release-images-${{ env.JIRA_KEY }}-${{ github.sha }}
+          path: images
+
+      - name: Load the release-candidate images — digest-checked, no rebuild, no pull (SCRUM-9-AC-03, AC-04)
+        run: |
+          ls -l images
+          .github/scripts/release/e2e-images.sh load images
+          { echo "TODO_BACKEND_IMAGE=${IMAGE_BACKEND}"; echo "TODO_FRONTEND_IMAGE=${IMAGE_FRONTEND}"; echo "TODO_IMAGE_TAG=${VERSION}"; } >> "$GITHUB_ENV"
+
+      - name: Pull PostgreSQL (the only image Compose may fetch; not a release artefact)
+        run: docker compose pull postgres
+
+      - name: Start the candidate stack and wait for health (SCRUM-9-AC-03, AC-05)
+        id: stack
+        timeout-minutes: 6
+        run: |
+          docker compose config --format json | jq -r '.services | to_entries[] | "\(.key): \(.value.image)"'
+          docker compose up -d --no-build --pull never --wait --wait-timeout 240
+          docker compose ps
+
+      - name: Running containers are the candidate images (SCRUM-9-AC-04)
+        if: ${{ !cancelled() && steps.stack.outcome == 'success' }}
+        run: .github/scripts/release/e2e-images.sh assert-running "after up"
+
+      - name: Image runtime checks on the candidate (SCRUM-9-AC-08; SCRUM-7-AC-22, SCRUM-8-AC-04, AC-14)
+        if: ${{ !cancelled() && steps.stack.outcome == 'success' }}
+        env:
+          EXPECTED_VERSION: ${{ env.VERSION }}
+        run: .github/scripts/verify-images.sh "${IMAGE_BACKEND}:${VERSION}" "${IMAGE_FRONTEND}:${VERSION}"
+
+      - name: Playwright and Chromium (SCRUM-9-AC-02)
+        if: ${{ !cancelled() && steps.stack.outcome == 'success' }}
+        uses: ./.github/actions/e2e-playwright
+
+      - name: Playwright compose suite against the candidate (SCRUM-9-AC-06, AC-09)
+        id: pw
+        if: ${{ !cancelled() && steps.stack.outcome == 'success' }}
+        timeout-minutes: 10
+        working-directory: e2e
+        env:
+          E2E_EXPECT_EMPTY_DB: "1"
+          E2E_JIRA_KEY: ${{ env.JIRA_KEY }}
+          E2E_GIT_SHA: ${{ env.SHA }}
+          E2E_VERSION: ${{ env.VERSION }}
+        run: npx playwright test # all compose projects (empty-state, http, ui); retries: 1 on CI (config)
+
+      - name: Critical To-Do workflows passed; flaky tests reported (SCRUM-9-AC-07, AC-09)
+        if: ${{ !cancelled() && steps.stack.outcome == 'success' }}
+        run: >
+          node .github/scripts/release/e2e-gate.mjs --results e2e/reports/compose/results.json
+          --tag critical --min 12 --summary "$GITHUB_STEP_SUMMARY"
+
+      - name: Lifecycle and persistence of the candidate images (SCRUM-9-AC-08; SCRUM-7-AC-03, AC-10)
+        id: lifecycle
+        if: ${{ !cancelled() && steps.stack.outcome == 'success' }}
+        timeout-minutes: 6
+        run: .github/scripts/verify-lifecycle.sh
+
+      - name: Still the candidate images after the lifecycle restarts (SCRUM-9-AC-04)
+        if: ${{ !cancelled() && steps.lifecycle.outcome == 'success' }}
+        run: .github/scripts/release/e2e-images.sh assert-running "after lifecycle"
+
+      - name: Summary, diagnostics, logs, teardown, reports (SCRUM-9-AC-12, AC-13, AC-14)
+        if: always()
+        uses: ./.github/actions/e2e-teardown
+        with:
+          artifact-name: todo-release-e2e-${{ env.JIRA_KEY }}-${{ github.sha }}-reports
+          job-status: ${{ job.status }}
+          summary-modes: compose
+          retention-days: "30"
+
+      - name: Report contents and cleanup check (SCRUM-9-AC-12, AC-14 evidence)
+        if: always()
+        env:
+          ARTIFACT: todo-release-e2e-${{ env.JIRA_KEY }}-${{ github.sha }}-reports
+        run: |
+          echo "artifact ${ARTIFACT} (e2e/reports/):"
+          find e2e/reports -type f -not -path '*/html/data/*' -printf '%8s  %p\n' 2>/dev/null | sort -k2 || true
+          echo "html/data files: $(find e2e/reports/compose/html/data -type f 2>/dev/null | wc -l)"
+          echo "containers left in project ${COMPOSE_PROJECT_NAME}: $(docker ps -aq --filter "label=com.docker.compose.project=${COMPOSE_PROJECT_NAME}" | wc -l)"
+          echo "volumes left in project ${COMPOSE_PROJECT_NAME}: $(docker volume ls -q --filter "label=com.docker.compose.project=${COMPOSE_PROJECT_NAME}" | wc -l)"
+          {
+            echo "### Pre-release e2e — artifact and cleanup (SCRUM-9-AC-12, AC-14)"
+            echo
+            echo "Mode **${MODE}**, version \`${VERSION}\`, commit \`${SHA}\` · artifact \`${ARTIFACT}\` (30 days)"
+            echo "· IDs exercised: SCRUM-9-AC-03 AC-04 AC-05 AC-06 AC-07 AC-08 AC-09 AC-12 AC-13 AC-14"
+          } >> "$GITHUB_STEP_SUMMARY"
+
   # ══════════════════════════════════════════════════════════════════════════════════════════════════════════════
   # RELEASE GATE — the single aggregation point (SCRUM-8-AC-07). `publish` needs only this job (plus outputs).
-  # SCRUM-9: add the pre-release e2e job to `needs` below. It must consume the SAME images: download artifact
-  # todo-release-images-<JIRA_KEY>-<sha>, `skopeo copy oci-archive:… docker-daemon:<IMAGE>:<version>`, then
-  # TODO_BACKEND_IMAGE=$IMAGE_BACKEND TODO_FRONTEND_IMAGE=$IMAGE_FRONTEND TODO_IMAGE_TAG=<version>
-  # docker compose --profile app up --no-build -d --wait  (design §6.5).
+  # SCRUM-9 (ADR 0015): `e2e-release` ran the Playwright compose suite against the exact OCI archives `publish` will
+  # push (digest chain asserted, SCRUM-9-AC-04). Any non-success input — e2e included — blocks (SCRUM-9-AC-10).
   # ══════════════════════════════════════════════════════════════════════════════════════════════════════════════
   release-gate:
-    needs: [version, tooling, backend, frontend, images, sbom, scan]
+    needs: [version, tooling, backend, frontend, images, sbom, scan, e2e-release] # SCRUM-9-AC-10
     if: ${{ !cancelled() }}
     runs-on: ubuntu-latest
     timeout-minutes: 10
@@ -661,7 +788,7 @@ jobs:
           node -e 'const n = JSON.parse(process.env.NEEDS);
           const bad = Object.entries(n).filter(([, v]) => v.result !== "success");
           for (const [k, v] of Object.entries(n)) console.log(`${k}: ${v.result}`);
-          if (bad.length) { console.log("::error::SCRUM-8-AC-07: gate inputs not successful: " + bad.map(([k, v]) => k + "=" + v.result).join(", ")); process.exit(1) }'
+          if (bad.length) { console.log("::error::SCRUM-8-AC-07, SCRUM-9-AC-10: gate inputs not successful: " + bad.map(([k, v]) => k + "=" + v.result).join(", ")); process.exit(1) }'
 
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:

@@ -4,7 +4,7 @@
 import { env } from './support/env'
 import { expect, test, uniqueTitle } from './support/fixtures'
 
-test('SCRUM-7-AC-18: on an empty database the list shows its empty states and fills once a task is created', async ({
+test('SCRUM-7-AC-18: on an empty database the list shows its empty states and fills once a task is created', { tag: '@critical' }, async ({
   page,
   api,
 }) => {

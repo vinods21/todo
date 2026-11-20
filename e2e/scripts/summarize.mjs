@@ -18,7 +18,10 @@ function walk(suites, path, visit) {
   }
 }
 
-for (const mode of ['compose', 'dev']) {
+// SCRUM-9-AC-13 (design §6.2): modes to report; default = the CI job's 'compose dev' (output unchanged).
+const modes = (process.env.E2E_SUMMARY_MODES ?? 'compose dev').split(/\s+/).filter(Boolean)
+
+for (const mode of modes) {
   out.push(`### E2E (${mode}, ${key})`)
   const resultsFile = join(reports, mode, 'results.json')
   if (!existsSync(resultsFile)) {

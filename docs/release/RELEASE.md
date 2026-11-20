@@ -8,6 +8,9 @@
 | Workflow | [`.github/workflows/release.yml`](../../.github/workflows/release.yml) (name **Release**) |
 | Related | [ROLLBACK.md](ROLLBACK.md) · [vulnerability-policy.md](vulnerability-policy.md) |
 
+> **Known issue — `v1.0.0`:** do not run the Compose stack with `todo-frontend` images built by the `Release` pipeline
+> at `v1.0.0`; cut **`v1.0.1`** after the SCRUM-9 merge. Details: [§10](#10-known-issues).
+
 ## 1. Versioning (SCRUM-8-AC-01..AC-03, AC-05)
 
 **One product version** `MAJOR.MINOR.PATCH` ([SemVer 2.0.0](https://semver.org)) for the backend jar, the frontend
@@ -88,7 +91,8 @@ What each job does:
 | `sbom` | Trivy image SBOMs from the OCI archives; finalizes all four SBOMs; CycloneDX schema validation; minimum component counts | both |
 | `scan` | Trivy DB update (fails closed), 6 scan targets, live gate self-test, **vulnerability gate** | both |
 | `code-scanning` | SARIF → Security tab (not for fork PRs; reporting only) | both |
-| `release-gate` | **single aggregation point**: every gate must be `success`; assembles the release-candidate bundle (`SHA256SUMS`, notes) | both |
+| `e2e-release` | **pre-release e2e gate** (SCRUM-9, ADR 0015): loads the two OCI archives into the runner's Docker (digest-checked; no rebuild, no pull, no login), asserts that the running containers are exactly those images (digest chain, image store recorded), Compose stack, full Playwright compose suite + `@critical` guard (≥ 12, all passed), image + lifecycle checks; report artifact; always `down -v` | both |
+| `release-gate` | **single aggregation point**: every gate incl. `e2e-release` must be `success`; assembles the release-candidate bundle (`SHA256SUMS`, notes) | both |
 | `publish` | pre-existence (authoritative) → push immutable tags → attestations → annotated tag → draft release → publish → move `X.Y`/`latest` | **release only** |
 | `verify` | post-publish verification from the outside (AC-28) | **release only** |
 
@@ -110,14 +114,62 @@ Outputs of a dry run (workflow artifacts, ADR 0008 naming):
 | `todo-release-candidate-<KEY>-<sha>` | the would-be release: `assets/` (jar, tarball, 4 SBOMs, scan reports, image list, `SHA256SUMS`), `release-notes.md` (DRY RUN banner), `plan.json` — 30 days |
 | `todo-release-scan-<KEY>-<sha>` | Trivy JSON + SARIF per target, `verdict.json`, `summary.md`, DB metadata, live self-test log |
 | `todo-release-sbom-<KEY>-<sha>` | the four finalized SBOMs + component counts |
-| `todo-release-images-<KEY>-<sha>` | the two OCI archives (what SCRUM-9's e2e job will consume) — 7 days |
+| `todo-release-images-<KEY>-<sha>` | the two OCI archives (consumed by `sbom`, `scan`, `e2e-release` and `publish`) — 7 days |
+| `todo-release-e2e-<KEY>-<sha>-reports` | pre-release e2e (SCRUM-9-AC-12): Playwright `compose/` HTML, JUnit, JSON, traces/screenshots/videos of failed or retried tests; `release-images.json` (digest chain); `compose-ps.txt`, `compose-logs.txt`, `compose-logs-before-down.txt` (lifecycle) — always uploaded, 30 days |
 | `todo-release-backend-…`, `todo-release-frontend-…` (+ `-reports`), `todo-release-tooling-…-reports` | jar/tarball/app SBOMs, test and coverage reports |
 
 Reading the run summary: `version` shows **DRY RUN**, the would-be release version, the build version, the tag plan,
 the guard result and the pre-existence table (GHCR rows are `unknown` before the first release: anonymous reads of a
 package that does not exist yet answer 403 — re-checked authoritatively in `publish`); `scan` shows the gate tables;
 `release-gate` shows the asset table with SHA-256s, image digests (local), SBOM counts, gate verdict and
-reproducibility results.
+reproducibility results; `e2e-release` shows the candidate-image table (digests, image IDs, store), the image
+checks, the e2e counts, the `@critical` verdict and flaky tests, and the lifecycle results.
+
+### 3.1 Pre-release e2e (SCRUM-9, ADR 0015)
+
+`e2e-release` (`needs: [version, images]`, parallel to `sbom`/`scan`, both modes) tests **the bytes that `publish`
+pushes**, not a rebuild:
+
+1. Downloads `todo-release-images-<KEY>-<sha>` and, per archive, asserts that its manifest digest equals the `images`
+   output (the digest scanned, SBOM'd and pushed), then `docker load`s it and tags it `ghcr.io/vinods21/todo-<svc>:<version>`
+   (`.github/scripts/release/e2e-images.sh load`).
+2. Starts `docker-compose.yml` with `TODO_BACKEND_IMAGE`/`TODO_FRONTEND_IMAGE`/`TODO_IMAGE_TAG=<version>` via
+   `up -d --no-build --pull never --wait --wait-timeout 240` (only `postgres:16-alpine` is pulled, in its own step).
+3. Asserts the digest chain (`e2e-images.sh assert-running`, after `up` and again after the lifecycle restarts):
+   running container `.Image` = local image ID = archive **config** digest (classic image store) or **manifest**
+   digest (containerd image store); archive manifest digest = published digest. The store is detected and recorded;
+   any other store fails the job (never guessed).
+4. Runs `verify-images.sh`, the **full** compose Playwright suite (`empty-state`, `http`, `ui`) with the candidate's
+   identity on a fresh volume, the `@critical` guard (`e2e-gate.mjs --tag critical --min 12`: ≥ 12 executed, all
+   passed, skipped counts as failure; passed-on-retry tests are named and raise a warning), `verify-lifecycle.sh`.
+5. Always: summary, diagnostics on failure, Compose logs, `docker compose down -v --remove-orphans`, artifact
+   `todo-release-e2e-<KEY>-<sha>-reports`.
+
+`release-gate` needs `e2e-release`; any result other than `success` (failure, cancelled, skipped) fails the gate, so
+`publish`/`verify` cannot run. Marking more tests `@critical` (or removing a tag) requires adjusting `--min` in
+`release.yml`.
+
+**Reproduce a pre-release e2e run locally** against the candidate archives (Docker ≥ 25, Node from
+`frontend/.nvmrc`, `gh` logged in; values from the run's `e2e-release` summary or `release-images.json`):
+
+```sh
+RUN=<run id>; KEY=<jira key>; SHA=<full sha>          # from the Release run
+git checkout "$SHA"
+gh run download "$RUN" --repo vinods21/todo -n "todo-release-images-$KEY-$SHA" -D images
+export IMAGE_BACKEND=ghcr.io/vinods21/todo-backend IMAGE_FRONTEND=ghcr.io/vinods21/todo-frontend
+export VERSION=<stamped version> BACKEND_DIGEST=<sha256:…> FRONTEND_DIGEST=<sha256:…>
+.github/scripts/release/e2e-images.sh load images
+export TODO_BACKEND_IMAGE=$IMAGE_BACKEND TODO_FRONTEND_IMAGE=$IMAGE_FRONTEND TODO_IMAGE_TAG=$VERSION
+export COMPOSE_PROFILES=app COMPOSE_PROJECT_NAME=todo-release-e2e
+docker compose pull postgres && docker compose up -d --no-build --pull never --wait
+.github/scripts/release/e2e-images.sh assert-running
+(cd e2e && npm ci && npx playwright install --with-deps --only-shell chromium \
+  && E2E_EXPECT_EMPTY_DB=1 E2E_JIRA_KEY=$KEY E2E_GIT_SHA=$SHA E2E_VERSION=$VERSION npx playwright test)
+node .github/scripts/release/e2e-gate.mjs --results e2e/reports/compose/results.json --tag critical --min 12
+docker compose down -v --remove-orphans
+```
+
+(Locally `retries` is 0; set `CI=1` to get the CI retry policy.)
 
 ## 4. What a release produces (SCRUM-8-AC-10, AC-13, AC-18, AC-26)
 
@@ -213,7 +265,7 @@ version exists.
 
 | Failed at (job `publish` step) | State that may exist | What to do |
 |---|---|---|
-| any job before `publish` (incl. `release-gate`) | **nothing** published | fix the cause (or wait for the DB mirror), re-run or re-dispatch — same version |
+| any job before `publish` (incl. `e2e-release`, `release-gate`) | **nothing** published | fix the cause (or wait for the DB mirror), re-run or re-dispatch — same version. **e2e failed → nothing published:** a real e2e failure is a product bug — fix forward and re-dispatch; a flake (Docker Hub, runner) — re-run the failed jobs (`gh run rerun <id> --failed`): `e2e-release` and `release-gate` re-test the same digests from the run's images artifact (7 days) |
 | 1–4 (download, re-verify, login, pre-existence) | nothing published | fix and re-dispatch — same version (unless step 4 found an existing item: then that version is burnt) |
 | 5 push immutable tags | some of `X.Y.Z`, `X.Y.Z-<id>` in GHCR; no tag, no release | version **burnt** → dispatch `version=X.Y.(Z+1)`; leave the pushed images (they are private until made public) |
 | 6–7 attestations | immutable image tags (+ some attestations) | burnt → next patch |
@@ -272,3 +324,34 @@ Done once by the repository owner (or by the Dev agent with owner approval) afte
 7. Record the evidence in [`docs/traceability/SCRUM-8.md`](../traceability/SCRUM-8.md) ("First release" line): run
    id, commit SHA, tag, release URL, both image digests, `gh attestation verify` and `sha256sum -c` output, settings
    applied — in a follow-up commit (or a Jira comment on SCRUM-8 if direct commits to `main` are not allowed).
+
+## 10. Known issues
+
+### `v1.0.0` — prebuilt frontend bundle calls `http://localhost:8080` (found by SCRUM-9)
+
+**Defect.** Up to and including `v1.0.0` (`8beb5aa`), the `Release` job `frontend` ran `npm run build` without
+`VITE_API_BASE_URL=/`, which the Dockerfile `source` stage sets (ADR 0011, SCRUM-7-AC-17). Vite therefore inlined the
+dev default `http://localhost:8080`, and the `todo-frontend` image packaged from that bundle (`DIST_SOURCE=prebuilt`)
+cannot reach the API: its own CSP (`connect-src 'self'`) blocks every `/api` call, so the task list never loads. The
+first `e2e-release` run ([44595056165](https://github.com/vinods21/todo/actions/runs/44595056165)) caught it; fixed in
+`69180b4` (SCRUM-9). The backend image and images built from source (`docker build frontend`, CI, local Compose) are
+not affected.
+
+**State of `v1.0.0`** (checked 2026-11-20 via the REST API): tag `v1.0.0` → `8beb5aa` (lightweight), GitHub Release
+`v1.0.0` published 2026-11-19T18:46Z as a **pre-release with no assets** and auto-generated notes; the `Release`
+workflow has no `workflow_dispatch` run, so `publish` never pushed `1.0.0` images, SBOMs or attestations. Any
+`todo-frontend` image or `todo-frontend-1.0.0*.tar.gz` built by the `Release` pipeline at that commit (e.g. dry-run
+`todo-release-images-*` artifacts), or pushed by hand as `1.0.0` / `1.0` / `latest`, carries the defect.
+
+**Remedy.**
+
+1. **Do not use `v1.0.0` pipeline-built frontend images for the Compose stack.** To run `v1.0.0`, build from source
+   (`git checkout v1.0.0 && docker compose --profile app up --build`) — or use `v1.0.1` once released.
+2. After the SCRUM-9 PR is merged, cut **`v1.0.1`** (`gh workflow run release.yml --ref main -f bump=patch
+   -f dry_run=false`); `e2e-release` now proves the UI works against the exact images before anything is published.
+   Do **not** touch the `v1.0.0` tag or release (§8: never delete or move a `v*` tag); optionally prefix the `v1.0.0`
+   notes with "⚠ Do not use the prebuilt frontend image, use v1.0.1" ([ROLLBACK.md §6](ROLLBACK.md#6-withdrawing-a-bad-release)).
+3. **Watch the pre-existence check of the `v1.0.1` run.** Because a `v*` tag and a release now exist, step 4 of
+   `publish` no longer treats a GHCR `403/denied` answer as "absent" (that exception applies only before the first
+   release, §9 step 5). If the GHCR packages do not exist yet and the check refuses with `unknown … denied`, nothing has
+   been published (the version is not burnt): create the packages / fix access, then re-dispatch the same version.
