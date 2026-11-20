@@ -37,6 +37,11 @@ FROM dist-${DIST_SOURCE} AS dist
 
 # ---- runtime stage: unprivileged nginx (UID 101, port 8080) ----
 FROM nginx/nginx-unprivileged:1.30.7-alpine3.24
+# SCRUM-11 / ADR 0016 §2: OS-package floors until the base image ships them; build fails if unavailable (NFR-02).
+# Root only for apk; the image switches back to 101 below. No `openssl` here (would install the CLI).
+USER root
+RUN apk add --no-cache 'libcrypto3>=3.5.9-r1' 'libssl3>=3.5.9-r1' 'zlib>=1.4-r0' \
+ && apk list --installed libcrypto3 libssl3 zlib
 COPY nginx/security-headers.conf nginx/proxy.conf /etc/nginx/snippets/
 # Rendered by the entrypoint to /etc/nginx/conf.d/default.conf (replaces the base image's default server).
 COPY nginx/default.conf.template /etc/nginx/templates/default.conf.template

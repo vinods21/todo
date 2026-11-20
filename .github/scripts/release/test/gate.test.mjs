@@ -219,3 +219,54 @@ test('SCRUM-8-AC-22: check-allowlist exits 0 with invalid entries (warned) and 2
   writeFileSync(bad, 'nope')
   assert.equal(cli(['check-allowlist', '--allowlist', bad, '--today', TODAY]).status, 2)
 })
+
+// SCRUM-11-AC-08 (ADR 0016): fixable MEDIUM/UNKNOWN in gated targets are itemised and annotated, never blocking.
+const fmuIds = (r) => r.fixableMediumUnknown.map((f) => f.id)
+
+test('SCRUM-11-AC-08: fixable MEDIUM in a gated target → PASS, listed, in the markdown table and annotated', () => {
+  const r = gate({ targets: [gated('backend-image', withSeverity('MEDIUM'))] })
+  assert.equal(r.verdict, 'PASS')
+  assert.ok(fmuIds(r).includes('CVE-2026-11111'))
+  assert.deepEqual(r.fixableMediumUnknown.find((f) => f.id === 'CVE-2026-11111').targets, ['backend-image'])
+  const md = renderGateMarkdown(r)
+  assert.match(md, /#### MEDIUM\/UNKNOWN with a fix — reported, not blocking; triage per ADR 0016 \(2\)/)
+  assert.match(md, /\| MEDIUM \| CVE-2026-11111 \| org\.example:vulnerable-lib \| 1\.0\.0 \| 1\.0\.1 \| backend-image \|/)
+  const report = join(dir, 'medium.json')
+  writeFileSync(report, JSON.stringify(withSeverity('MEDIUM')))
+  const c = cli([...base, '--allowlist', emptyAllow, '--gated', `backend-image=${report}`])
+  assert.equal(c.status, 0, c.out)
+  assert.match(c.out, /::warning::SCRUM-11 \(ADR 0016\) fixable MEDIUM CVE-2026-11111 in org\.example:vulnerable-lib 1\.0\.0 → 1\.0\.1 \[backend-image\]/)
+  assert.match(c.out, /::warning::SCRUM-11: 2 fixable MEDIUM\/UNKNOWN finding\(s\) in shipped components — not blocking/)
+})
+
+test('SCRUM-11-AC-08: fixable UNKNOWN in a gated target → PASS and listed', () => {
+  const r = gate({ targets: [gated('backend-image', withSeverity('UNKNOWN'))] })
+  assert.equal(r.verdict, 'PASS')
+  assert.ok(fmuIds(r).includes('CVE-2026-11111'))
+  assert.equal(r.fixableMediumUnknown.find((f) => f.id === 'CVE-2026-11111').severity, 'UNKNOWN')
+})
+
+test('SCRUM-11-AC-08: MEDIUM without a fix → not listed', () => {
+  const rep = withSeverity('MEDIUM')
+  delete rep.Results[0].Vulnerabilities[0].FixedVersion
+  rep.Results[0].Vulnerabilities[0].Status = 'affected'
+  const r = gate({ targets: [gated('backend-image', rep)] })
+  assert.equal(r.verdict, 'PASS')
+  assert.ok(!fmuIds(r).includes('CVE-2026-11111'))
+  assert.equal(r.targets['backend-image'].counts.MEDIUM, 2)
+})
+
+test('SCRUM-11-AC-08: fixable MEDIUM only in a reported target → not listed', () => {
+  const r = gate({ targets: [reported('backend-all-scopes', withSeverity('MEDIUM')), clean()] })
+  assert.equal(r.verdict, 'PASS')
+  assert.deepEqual(r.fixableMediumUnknown, [])
+  assert.match(renderGateMarkdown(r), /triage per ADR 0016 \(0\)\n\nNone\./)
+})
+
+test('SCRUM-11-AC-08: fixable HIGH still BLOCKED and not in the MEDIUM/UNKNOWN list', () => {
+  const r = gate({ targets: [gated('backend-runtime', fx('trivy-fixable-high.json'))] })
+  assert.equal(r.verdict, 'BLOCKED')
+  assert.deepEqual(r.blocking.map((f) => f.id), ['CVE-2026-11111'])
+  assert.ok(!fmuIds(r).includes('CVE-2026-11111'))
+  assert.ok(r.fixableMediumUnknown.every((f) => f.severity === 'MEDIUM' || f.severity === 'UNKNOWN'))
+})

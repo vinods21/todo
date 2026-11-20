@@ -44,7 +44,16 @@ COPY --from=backend-jar app.jar /app.jar
 FROM jar-${JAR_SOURCE} AS jar
 
 # ---- runtime stage: JRE only (NFR-02, NFR-03) ----
-FROM eclipse-temurin:21.0.13_9-jre-alpine
+# SCRUM-11 / ADR 0016: Alpine minor pinned in the tag (same image as 21.0.13_9-jre-alpine on 2026-11-20).
+FROM eclipse-temurin:21.0.13_9-jre-alpine-3.24
+# SCRUM-11 / ADR 0016 §2: OS-package floors until the base image ships them (Alpine 3.24 fixes of 2026-11-06/18;
+# no rebuilt base yet). The build fails if the repository does not provide them (NFR-02). Remove each floor in the
+# base-image bump that already contains it. gnupg (+ gnutls and 27 more) is only needed by the base image's own JDK
+# signature check, never at runtime: removed (SCRUM-11-AC-04).
+RUN apk add --no-cache 'libcrypto3>=3.5.9-r1' 'libssl3>=3.5.9-r1' 'openssl>=3.5.9-r1' 'zlib>=1.4-r0' \
+ && apk del --no-cache gnupg \
+ && ! apk info -e gnutls \
+ && apk list --installed libcrypto3 libssl3 openssl zlib
 RUN addgroup -S -g 10001 todo \
  && adduser -S -D -H -u 10001 -G todo -s /sbin/nologin todo
 WORKDIR /app
@@ -74,6 +83,6 @@ LABEL org.opencontainers.image.title="todo-backend" \
       org.opencontainers.image.source="${SOURCE_URL}" \
       org.opencontainers.image.created="${BUILD_DATE}" \
       org.opencontainers.image.licenses="NOASSERTION" \
-      org.opencontainers.image.base.name="docker.io/library/eclipse-temurin:21.0.13_9-jre-alpine" \
+      org.opencontainers.image.base.name="docker.io/library/eclipse-temurin:21.0.13_9-jre-alpine-3.24" \
       com.vinods21.todo.jira="${JIRA_KEY}" \
       com.vinods21.todo.branch="${GIT_BRANCH}"

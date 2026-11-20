@@ -149,6 +149,10 @@ export function evaluateGate({ targets, dbMeta, allowlist, allowlistError = null
   const unfixedCriticalHigh = dedup(
     all.filter((f) => f.class === 'gated' && f.kind === 'vulnerability' && ['CRITICAL', 'HIGH'].includes(f.severity) && !fixable(f)),
   )
+  // SCRUM-11-AC-08 (ADR 0016): fixable MEDIUM/UNKNOWN in gated targets are itemised — reported, never blocking.
+  const fixableMediumUnknown = dedup(
+    all.filter((f) => f.class === 'gated' && f.kind === 'vulnerability' && (f.severity === 'MEDIUM' || f.severity === 'UNKNOWN') && fixable(f)),
+  )
   const reportedOnly = dedup(
     all.filter((f) => f.class === 'reported' && !gatedKeys.has(key(f)) && ['CRITICAL', 'HIGH'].includes(f.severity)),
   )
@@ -167,6 +171,7 @@ export function evaluateGate({ targets, dbMeta, allowlist, allowlistError = null
     blocking: dedup(blocking),
     suppressed: suppressed.map(({ finding, entry }) => ({ finding: { ...finding, targets: [finding.target] }, entry })),
     unfixedCriticalHigh,
+    fixableMediumUnknown,
     reportedOnly,
     allowlist: {
       valid: valid.map(strip),
@@ -218,6 +223,8 @@ export function renderGateMarkdown(result, { heading = '### Vulnerability gate (
   }
   table(`Blocking findings (${result.blocking.length})`, result.blocking)
   table(`CRITICAL/HIGH without a fix — reported, not blocking (${result.unfixedCriticalHigh.length})`, result.unfixedCriticalHigh)
+  // SCRUM-11-AC-08 (ADR 0016)
+  table(`MEDIUM/UNKNOWN with a fix — reported, not blocking; triage per ADR 0016 (${result.fixableMediumUnknown.length})`, result.fixableMediumUnknown)
   table(`CRITICAL/HIGH only in test/dev scope — reported (${result.reportedOnly.length})`, result.reportedOnly)
   out.push(`#### Allow-list (.github/security/vulnerability-allowlist.json)`, '')
   const al = result.allowlist

@@ -111,6 +111,14 @@ if (command === 'check-allowlist') {
     console.log(`::error::SCRUM-8-AC-21 blocking: ${f.severity} ${f.id} in ${f.pkg} ${f.installed} (fixed: ${f.fixed || 'n/a'}) [${f.targets.join(', ')}]`)
   }
   for (const e of result.errors) console.log(`::error::SCRUM-8-AC-21 gate error (fail closed): ${e}`)
+  // SCRUM-11-AC-08 (ADR 0016): annotate fixable MEDIUM/UNKNOWN (at most 10 + one summary line); never blocking.
+  const fmu = result.fixableMediumUnknown ?? []
+  for (const f of fmu.slice(0, 10)) {
+    console.log(`::warning::SCRUM-11 (ADR 0016) fixable ${f.severity} ${f.id} in ${f.pkg} ${f.installed} → ${f.fixed} [${f.targets.join(', ')}]`)
+  }
+  if (fmu.length) {
+    console.log(`::warning::SCRUM-11: ${fmu.length} fixable MEDIUM/UNKNOWN finding(s) in shipped components — not blocking; triage within 5 working days (ADR 0016)`)
+  }
   console.log(`Gate verdict: ${result.verdict}`)
   process.exit(exitCodeFor(result.verdict))
 } else {
