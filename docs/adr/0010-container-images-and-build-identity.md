@@ -10,7 +10,10 @@
   `org.opencontainers.image.base.name` added; CI images also tagged with the build version. **Amended by
   [ADR 0014](0014-vulnerability-scanning-policy.md)**: vulnerability scanning (SCRUM-7 Q-02) is done there.
   **Amended by [SCRUM-10](https://suranagivinod.atlassian.net/browse/SCRUM-10)**: frontend runtime base image
-  bumped to nginx-unprivileged 1.30.7 (see the SCRUM-10 note under "Base images").
+  bumped to nginx-unprivileged 1.30.7 (see the SCRUM-10 note under "Base images"). **Amended by
+  [ADR 0016](0016-medium-findings-and-os-package-floors.md) (SCRUM-11)**: runtime stages may raise Alpine packages to
+  a version floor and remove provably unused base-image packages; backend runtime tag gains `-3.24` (see the SCRUM-11
+  note under "Base images").
 - Design: [SCRUM-7 design §3–§4](../architecture/SCRUM-7-design.md)
 
 ## Context
@@ -67,7 +70,7 @@ Docker can run the stack. Constraints:
 
 | Image | Build stage | Runtime stage |
 |---|---|---|
-| backend | `eclipse-temurin:21.0.13_9-jdk-noble` (glibc; has `curl`/`wget`, which the only-script Maven Wrapper needs to download Maven 3.9.11) | `eclipse-temurin:21.0.13_9-jre-alpine` (JRE only; busybox `wget` for the healthcheck) |
+| backend | `eclipse-temurin:21.0.13_9-jdk-noble` (glibc; has `curl`/`wget`, which the only-script Maven Wrapper needs to download Maven 3.9.11) | `eclipse-temurin:21.0.13_9-jre-alpine-3.24` (JRE only; busybox `wget` for the healthcheck) |
 | frontend | `node:22.23.4-alpine` (Node major = `frontend/.nvmrc`; satisfies `engines` `>=22.22.2 <23`) | `nginx/nginx-unprivileged:1.30.7-alpine3.24` (stable line; runs as UID 101, listens on 8080) |
 | postgres (Compose) | — | `postgres:16-alpine` — unchanged, deliberately the **same tag as Testcontainers** in the backend tests so the e2e and integration databases match; bump both together |
 
@@ -90,6 +93,16 @@ Docker can run the stack. Constraints:
   provenance: `nginx/docker-nginx-unprivileged` commits `bef9cb1` (`update.sh`: stable → 1.30.7) and `95b8382`
   (regenerated Dockerfiles), 2026-11-18. See [SCRUM-10 requirements](../requirements/SCRUM-10.md) and
   [design](../architecture/SCRUM-10-design.md); evidence in [the SCRUM-10 matrix](../traceability/SCRUM-10.md).
+- **SCRUM-11 (2026-11-20):** backend runtime tag `eclipse-temurin:21.0.13_9-jre-alpine` →
+  `eclipse-temurin:21.0.13_9-jre-alpine-3.24` (same image and index digest today; the Alpine minor can no longer move
+  silently). Both runtime stages add OS-package **floors** ([ADR 0016](0016-medium-findings-and-os-package-floors.md)
+  §2) because no rebuilt base exists yet: `libcrypto3`/`libssl3` `>=3.5.9-r1` (+ `openssl>=3.5.9-r1` backend) for
+  CVE-2026-107496, CVE-2026-88822, CVE-2026-88823, CVE-2026-95691, CVE-2026-95692, and `zlib>=1.4-r0` for
+  CVE-2026-4738. The backend removes `gnupg` (only used by Temurin's own JDK signature check; pulls `gnutls`):
+  CVE-2026-127039, CVE-2026-127040, CVE-2026-127231; the build asserts `gnutls` is absent. The frontend stage switches
+  to `root` for `apk` and back to `101:101`. Remove each floor in the base-image bump that already contains it. See
+  [ADR 0016](0016-medium-findings-and-os-package-floors.md), [SCRUM-11 design](../architecture/SCRUM-11-design.md),
+  [the SCRUM-11 matrix](../traceability/SCRUM-11.md).
 
 ### Image structure
 

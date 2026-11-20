@@ -4,7 +4,7 @@
 export const MIN_COMPONENTS = Object.freeze({
   'backend-app': 74,
   'frontend-app': 7,
-  'backend-image': 125,
+  'backend-image': 102, // SCRUM-11: gnupg removed (−29 OS packages); ⌊0.8 × 128⌋ (SCRUM-8 rule)
   'frontend-image': 56,
 })
 export const ROOT_NAMES = Object.freeze({

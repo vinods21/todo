@@ -250,7 +250,9 @@ The gate **fails** when a **shipped** component (backend runtime dependencies, n
 image's OS or language packages) has a **CRITICAL or HIGH vulnerability with an available fix**, or when an image
 contains **any secret** — after applying valid allow-list entries. Unfixed CRITICAL/HIGH, MEDIUM/LOW, and test/dev-only
 findings are reported, not blocking. The gate fails closed (DB download failure, scanner error, missing report, DB
-older than 72 h). The policy is identical for releases and dry-runs.
+older than 72 h). The policy is identical for releases and dry-runs. Fixable MEDIUM/UNKNOWN are listed and annotated,
+not blocking; triage within 5 working days, remediation or justification within 30 days
+([ADR 0016](../adr/0016-medium-findings-and-os-package-floors.md)).
 
 Exceptions: one entry per finding in `.github/security/vulnerability-allowlist.json` — exact ID, package and
 targets, justification, owner, `added`, and `expires` at most 90 days later; changed by PR only; expired or incomplete
