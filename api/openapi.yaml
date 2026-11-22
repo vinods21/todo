@@ -383,7 +383,8 @@ components:
           - string
           - "null"
         id:
-          type: string
+          format: int64
+          type: integer
         status:
           $ref: "#/components/schemas/TaskStatus"
         title:
