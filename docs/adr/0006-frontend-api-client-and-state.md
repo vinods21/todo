@@ -1,6 +1,6 @@
 # ADR 0006 — Frontend data access: typed `fetch` client with normalised `ApiError`, page-local state via a small `useAsync` hook
 
-- Status: Accepted
+- Status: Accepted · the contract trusted by `client.ts` is now `api/openapi.yaml`, enforced by [ADR 0017](0017-api-contract-openapi.md) (SCRUM-12)
 - Date: 2026-11-17
 - Jira: [SCRUM-1](https://suranagivinod.atlassian.net/browse/SCRUM-1) — SCRUM-1-AC-01, AC-04..AC-11, AC-13, NFR-05; assumptions A-01, A-02, A-07, A-08
 

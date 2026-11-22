@@ -1,6 +1,6 @@
 # ADR 0007 — Frontend testing: Vitest + React Testing Library (jsdom) + MSW node server, AC-prefixed test names
 
-- Status: Accepted
+- Status: Accepted · amended by [ADR 0017](0017-api-contract-openapi.md) (SCRUM-12): MSW default handlers and fixtures are validated against `api/openapi.yaml`
 - Date: 2026-11-17
 - Jira: [SCRUM-1](https://suranagivinod.atlassian.net/browse/SCRUM-1) — SCRUM-1-NFR-04, NFR-06, NFR-07, AC-01..AC-13; extends [ADR 0004](0004-traceability-conventions.md)
 
