@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # SCRUM-8-NFR-02 (ADR 0014, design §8.1): the only place that pins downloaded CLI tools — version + SHA-256.
-# Usage: install-tools.sh <tool>...   tools: trivy cyclonedx-cli shellcheck
+# Usage: install-tools.sh <tool>...   tools: trivy cyclonedx-cli shellcheck oasdiff
 # Installs into $RUNNER_TEMP/tools/bin (CI, added to $GITHUB_PATH) or ./.tools/bin (local). Fails on checksum mismatch.
 # Bumping a tool = change its version and checksum here (checksums from the release page, verified with sha256sum).
 set -euo pipefail
@@ -11,9 +11,12 @@ CYCLONEDX_CLI_VERSION=0.33.1
 CYCLONEDX_CLI_SHA256=bfc8b2538da86fe239bc53658bbb63c1c8c510a293c1e6891aa5bea5d3c58746
 SHELLCHECK_VERSION=0.11.0
 SHELLCHECK_SHA256=8c3be12b05d5c177a04c29e3c78ce89ac86f1595681cab149b65b97c4e227198
+# SCRUM-12 (ADR 0017): OpenAPI breaking-change detection (CI job api-contract)
+OASDIFF_VERSION=1.39.0
+OASDIFF_SHA256=71a85930728f367a2086077b7ae1411319421549d18473a3e8258b6451520433
 
 if [ "$#" -eq 0 ]; then
-  echo "usage: $0 trivy|cyclonedx-cli|shellcheck ..." >&2
+  echo "usage: $0 trivy|cyclonedx-cli|shellcheck|oasdiff ..." >&2
   exit 2
 fi
 
@@ -48,6 +51,12 @@ for tool in "$@"; do
       tar -xJf "$root/dl/shellcheck.tar.xz" -C "$root/dl"
       install -m 0755 "$root/dl/shellcheck-v${SHELLCHECK_VERSION}/shellcheck" "$bin/shellcheck"
       echo "shellcheck ${SHELLCHECK_VERSION} ($("$bin/shellcheck" --version | sed -n 2p))"
+      ;;
+    oasdiff)
+      fetch "https://github.com/oasdiff/oasdiff/releases/download/v${OASDIFF_VERSION}/oasdiff_${OASDIFF_VERSION}_linux_amd64.tar.gz" \
+        "$OASDIFF_SHA256" oasdiff.tar.gz
+      tar -xzf "$root/dl/oasdiff.tar.gz" -C "$bin" oasdiff
+      echo "oasdiff ${OASDIFF_VERSION} ($("$bin/oasdiff" --version))"
       ;;
     *)
       echo "unknown tool $tool" >&2

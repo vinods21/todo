@@ -59,8 +59,39 @@ jobs:
       - name: Build, test, coverage gate
         run: ./mvnw -B -ntp verify "-Djira.issue=${JIRA_KEY}" "-Drevision=${BUILD_VERSION}"
 
-      - name: Verify build identity (ADR 0008, SCRUM-8-AC-04)
+      # SCRUM-12-AC-05 (ADR 0017): on drift, the unified diff goes to the job summary and — together with the full
+      # generated document (plain and base64, between markers) — to the job log, so it can be reviewed and copied into
+      # api/openapi.yaml without downloading the artifact.
+      - name: OpenAPI drift diff (SCRUM-12-AC-05)
+        if: failure() && hashFiles('target/openapi/openapi.generated.yaml') != ''
+        run: |
+          if [ -f target/openapi/openapi.diff ]; then
+            {
+              echo "### OpenAPI drift (SCRUM-12-AC-05): committed \`api/openapi.yaml\` vs generated"
+              echo '```diff'; cat target/openapi/openapi.diff; echo '```'
+              echo "Intended? Take \`openapi.generated.yaml\` from the job log / reports artifact or run \`./mvnw -B test -Dtest=OpenApiDriftIntegrationTest -Dopenapi.update=true\` (README → Changing the API contract)."
+            } >> "$GITHUB_STEP_SUMMARY"
+            echo "----- BEGIN api/openapi.yaml drift diff -----"; cat target/openapi/openapi.diff; echo "----- END api/openapi.yaml drift diff -----"
+          fi
+          echo "----- BEGIN generated api/openapi.yaml -----"; cat target/openapi/openapi.generated.yaml; echo "----- END generated api/openapi.yaml -----"
+          echo "----- BEGIN generated api/openapi.yaml (base64) -----"; base64 -w0 target/openapi/openapi.generated.yaml; echo; echo "----- END generated api/openapi.yaml (base64) -----"
+
+      - name: Failed test reports (log)
+        if: failure()
+        run: |
+          for f in target/surefire-reports/*.txt; do
+            [ -f "$f" ] || continue
+            if grep -qE 'FAILURE|ERROR' "$f"; then echo "----- $f"; cat "$f"; fi
+          done
+
+      - name: Verify build identity (ADR 0008, SCRUM-8-AC-04; SCRUM-12-AC-10 no OpenAPI generator in the jar)
         run: .github/scripts/verify-jar.sh "target/todo-backend-${BUILD_VERSION}.jar" "$BUILD_VERSION" "$JIRA_KEY" "$GITHUB_SHA"
+
+      - name: Runtime dependencies (SCRUM-12-NFR-01 evidence)
+        run: |
+          ./mvnw -B -ntp dependency:tree -Dscope=runtime "-Drevision=${BUILD_VERSION}" > target/dependency-tree-runtime.txt
+          echo "OpenAPI / Jackson artefacts on the runtime classpath:"
+          grep -iE 'swagger|springdoc|jackson' target/dependency-tree-runtime.txt || true
 
       - name: Coverage summary
         if: always()
@@ -92,6 +123,7 @@ jobs:
           path: |
             target/surefire-reports/
             target/site/jacoco/
+            target/openapi/
           if-no-files-found: warn
 
   # SCRUM-1-NFR-06: frontend lint, typecheck, tests (+coverage gate, junit) and production build artifact.
@@ -115,6 +147,9 @@ jobs:
 
       - name: Install
         run: npm ci
+
+      - name: Contract types up to date (SCRUM-12-AC-06)
+        run: npm run api:check # regenerates src/api/schema.d.ts from ../api/openapi.yaml; prints the diff and fails if stale
 
       - name: Audit runtime dependencies
         run: npm audit --omit=dev --audit-level=high
@@ -171,6 +206,61 @@ jobs:
           path: |
             frontend/reports/junit.xml
             frontend/reports/coverage/
+          if-no-files-found: warn
+
+  # SCRUM-12 (ADR 0017, design §7.4): validate api/openapi.yaml and gate breaking changes against main (merge base).
+  # New job → SHA-pinned actions (SCRUM-8-NFR-02).
+  api-contract:
+    needs: identity
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    env:
+      JIRA_KEY: ${{ needs.identity.outputs.jira_key }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0 # merge-base with origin/main
+          persist-credentials: false
+
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version-file: frontend/.nvmrc
+
+      - name: Install oasdiff (pinned + checksum)
+        run: .github/scripts/release/install-tools.sh oasdiff
+
+      - name: Breaking-change gate self-tests (SCRUM-12-AC-13)
+        run: >
+          mkdir -p reports &&
+          node --test --test-reporter=spec --test-reporter-destination=stdout
+          --test-reporter=junit --test-reporter-destination=reports/api-contract-junit.xml
+          ".github/scripts/api/test/*.test.mjs"
+
+      - name: Validate the contract and gate breaking changes vs main (SCRUM-12-AC-01, AC-08, AC-09)
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+          BASE_REF: ${{ github.base_ref }} # pull_request only; untrusted → env, quoted in the script
+          REF_NAME: ${{ github.ref_name }}
+          OUT: reports/api-contract
+        run: .github/scripts/api-contract.sh
+
+      - name: AC summary
+        if: always()
+        run: |
+          if [ -f reports/api-contract-junit.xml ]; then
+            tests=$(grep -c '<testcase' reports/api-contract-junit.xml || true)
+            failed=$(grep -c '<failure' reports/api-contract-junit.xml || true)
+            echo "### API contract gate tests (${JIRA_KEY} build): ${tests} tests, ${failed} failed" | tee -a "$GITHUB_STEP_SUMMARY"
+            { grep -oE 'SCRUM-[0-9]+-(AC|NFR)-[0-9]+' reports/api-contract-junit.xml || true; } | sort -uV | tr '\n' ' ' | tee -a "$GITHUB_STEP_SUMMARY"
+            echo >> "$GITHUB_STEP_SUMMARY"
+          fi
+
+      - name: Upload reports
+        if: always()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: todo-api-contract-${{ env.JIRA_KEY }}-${{ github.sha }}-reports
+          path: reports/
           if-no-files-found: warn
 
   # SCRUM-7-AC-20 (ADR 0010-0012): images + Compose stack + e2e. Parallel to build/frontend.

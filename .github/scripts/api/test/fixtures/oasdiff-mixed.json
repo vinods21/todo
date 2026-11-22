@@ -1,0 +1,122 @@
+[
+  {
+    "id": "request-parameter-became-required",
+    "text": "the `query` request parameter `page` became required",
+    "level": 3,
+    "operation": "GET",
+    "operationId": "listTasks",
+    "path": "/api/tasks",
+    "section": "paths",
+    "baseSource": {
+      "file": "base.yaml",
+      "line": 21,
+      "column": 9
+    },
+    "revisionSource": {
+      "file": "mixed.yaml",
+      "line": 25,
+      "column": 9
+    },
+    "fingerprint": "2e8ae3102947"
+  },
+  {
+    "id": "response-property-type-changed",
+    "text": "the `items/items/id` response's property `type/format` changed from `integer/int64` to `string` for status `200`",
+    "level": 3,
+    "operation": "GET",
+    "operationId": "listTasks",
+    "path": "/api/tasks",
+    "section": "paths",
+    "baseSource": {
+      "file": "base.yaml",
+      "line": 385,
+      "column": 11
+    },
+    "revisionSource": {
+      "file": "mixed.yaml",
+      "line": 392,
+      "column": 11
+    },
+    "fingerprint": "ba8e65cd7660"
+  },
+  {
+    "id": "response-property-type-changed",
+    "text": "the `id` response's property `type/format` changed from `integer/int64` to `string` for status `201`",
+    "level": 3,
+    "operation": "POST",
+    "operationId": "createTask",
+    "path": "/api/tasks",
+    "section": "paths",
+    "baseSource": {
+      "file": "base.yaml",
+      "line": 385,
+      "column": 11
+    },
+    "revisionSource": {
+      "file": "mixed.yaml",
+      "line": 392,
+      "column": 11
+    },
+    "fingerprint": "e00b1ef21c48"
+  },
+  {
+    "id": "response-property-type-changed",
+    "text": "the `id` response's property `type/format` changed from `integer/int64` to `string` for status `200`",
+    "level": 3,
+    "operation": "GET",
+    "operationId": "getTask",
+    "path": "/api/tasks/{id}",
+    "section": "paths",
+    "baseSource": {
+      "file": "base.yaml",
+      "line": 385,
+      "column": 11
+    },
+    "revisionSource": {
+      "file": "mixed.yaml",
+      "line": 392,
+      "column": 11
+    },
+    "fingerprint": "444660162e65"
+  },
+  {
+    "id": "response-property-type-changed",
+    "text": "the `id` response's property `type/format` changed from `integer/int64` to `string` for status `200`",
+    "level": 3,
+    "operation": "PUT",
+    "operationId": "updateTask",
+    "path": "/api/tasks/{id}",
+    "section": "paths",
+    "baseSource": {
+      "file": "base.yaml",
+      "line": 385,
+      "column": 11
+    },
+    "revisionSource": {
+      "file": "mixed.yaml",
+      "line": 392,
+      "column": 11
+    },
+    "fingerprint": "87b207c869be"
+  },
+  {
+    "id": "response-property-type-changed",
+    "text": "the `id` response's property `type/format` changed from `integer/int64` to `string` for status `200`",
+    "level": 3,
+    "operation": "PATCH",
+    "operationId": "updateTaskStatus",
+    "path": "/api/tasks/{id}/status",
+    "section": "paths",
+    "baseSource": {
+      "file": "base.yaml",
+      "line": 385,
+      "column": 11
+    },
+    "revisionSource": {
+      "file": "mixed.yaml",
+      "line": 392,
+      "column": 11
+    },
+    "fingerprint": "3ea53d21f4a8"
+  }
+]

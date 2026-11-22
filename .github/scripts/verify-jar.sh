@@ -29,6 +29,18 @@ for line in "build.version=${version}" "build.jira=${jira}" "build.git-commit=${
   grep -qxF "$line" <<<"$info" || fail "$info_path lacks '$line'"
 done
 
+# SCRUM-12-AC-10 / NFR-01 (ADR 0017): the OpenAPI generator is test-scope only — never in the jar. The only allowed
+# OpenAPI artefact is swagger-annotations-jakarta (annotations, no dependencies).
+libs=$(unzip -Z1 "$jar" | grep -E '^BOOT-INF/lib/' || true)
+openapi_libs=$(grep -iE '^BOOT-INF/lib/(springdoc|swagger|webjars-locator|scalar)' <<<"$libs" || true)
+forbidden=$(grep -vE '^BOOT-INF/lib/swagger-annotations-jakarta-[0-9][^/]*\.jar$' <<<"$openapi_libs" | grep -v '^$' || true)
+if [ -n "$forbidden" ]; then
+  echo "::error::SCRUM-12-AC-10: OpenAPI generator/UI jars found in $jar (must be test scope): $(tr '\n' ' ' <<<"$forbidden")"
+  failures=$((failures + 1))
+else
+  echo "SCRUM-12-AC-10: no OpenAPI generator/UI in $(basename "$jar"); OpenAPI jars present: $(tr '\n' ' ' <<<"${openapi_libs:-none}")"
+fi
+
 if [ "$failures" -gt 0 ]; then
   echo "--- manifest"; echo "$manifest"; echo "--- $info_path"; echo "$info"
   exit 1
