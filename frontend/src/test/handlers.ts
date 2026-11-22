@@ -118,7 +118,8 @@ export const handlers = [
     const invalid = validate(body, '/api/tasks')
     if (invalid) return invalid
     const [task] = seedTasks([{ ...body, title: body.title.trim(), status: body.status ?? 'TODO' }])
-    return HttpResponse.json(task, { status: 201 })
+    // SCRUM-12-AC-07: Location is a required header of 201 in api/openapi.yaml (the backend always sends it)
+    return HttpResponse.json(task, { status: 201, headers: { Location: `${API}/tasks/${task?.id}` } })
   }),
 
   http.put(`${API}/tasks/:id`, async ({ request, params }) => {

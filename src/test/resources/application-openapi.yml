@@ -1,0 +1,14 @@
+# SCRUM-12 (design §4.2, ADR 0017): generator settings for the contract tests (@OpenApiIntegrationTest =
+# @ActiveProfiles("openapi")). Test classpath only — springdoc is a test-scope dependency.
+springdoc:
+  api-docs:
+    enabled: true
+    version: openapi_3_1
+  paths-to-match: /api/**
+  default-produces-media-type: application/json # the default */* would document "*/*" content
+  default-consumes-media-type: application/json
+  override-with-generic-response: false # no generic responses from @RestControllerAdvice
+  writer-with-order-by-keys: true
+  model-converters:
+    java-nullable-property-customizer:
+      enabled: true # JSpecify @Nullable -> type: [T, "null"]

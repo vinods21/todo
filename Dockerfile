@@ -50,10 +50,12 @@ FROM eclipse-temurin:21.0.13_9-jre-alpine-3.24
 # no rebuilt base yet). The build fails if the repository does not provide them (NFR-02). Remove each floor in the
 # base-image bump that already contains it. gnupg (+ gnutls and 27 more) is only needed by the base image's own JDK
 # signature check, never at runtime: removed (SCRUM-11-AC-04).
+# SCRUM-12 (Release dry-run run 44994305133, scan): + libfontenc floor for HIGH CVE-2026-109908 (fixed 1.1.10-r0).
 RUN apk add --no-cache 'libcrypto3>=3.5.9-r1' 'libssl3>=3.5.9-r1' 'openssl>=3.5.9-r1' 'zlib>=1.4-r0' \
+      'libfontenc>=1.1.10-r0' \
  && apk del --no-cache gnupg \
  && ! apk info -e gnutls \
- && apk list --installed libcrypto3 libssl3 openssl zlib
+ && apk list --installed libcrypto3 libssl3 openssl zlib libfontenc
 RUN addgroup -S -g 10001 todo \
  && adduser -S -D -H -u 10001 -G todo -s /sbin/nologin todo
 WORKDIR /app

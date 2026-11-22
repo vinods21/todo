@@ -33,6 +33,14 @@ To-Do application (epic SCRUM-5):
   [`docs/architecture/SCRUM-8-design.md`](docs/architecture/SCRUM-8-design.md) · Matrix:
   [`docs/traceability/SCRUM-8.md`](docs/traceability/SCRUM-8.md)
 
+- **SCRUM-12 — API contract:** the Task API is described by the committed OpenAPI 3.1 document
+  [`api/openapi.yaml`](api/openapi.yaml) (generated code-first by springdoc in tests); CI checks backend conformance,
+  drift, the frontend types/MSW handlers and breaking changes against `main` — see
+  [Changing the API contract](#changing-the-api-contract-scrum-12). ADR:
+  [0017](docs/adr/0017-api-contract-openapi.md) · Requirements: [`docs/requirements/SCRUM-12.md`](docs/requirements/SCRUM-12.md) ·
+  Design: [`docs/architecture/SCRUM-12-design.md`](docs/architecture/SCRUM-12-design.md) · Matrix:
+  [`docs/traceability/SCRUM-12.md`](docs/traceability/SCRUM-12.md)
+
 Architecture decisions for all parts are in [`docs/adr/`](docs/adr).
 
 ## Run with Docker Compose (SCRUM-7)
@@ -167,6 +175,7 @@ version by digest, Flyway caveat, roll forward) · [vulnerability-policy.md](doc
 ```bash
 node --test ".github/scripts/release/test/*.test.mjs"
 .github/scripts/release/install-tools.sh shellcheck && .tools/bin/shellcheck .github/scripts/*.sh .github/scripts/release/*.sh
+.github/scripts/release/install-tools.sh oasdiff   # SCRUM-12: breaking-change detection (pinned + checksum)
 ```
 
 ## Run locally (SCRUM-2-NFR-08)
@@ -291,6 +300,63 @@ Example:
 curl -i -X POST http://localhost:8080/api/tasks \
   -H 'Content-Type: application/json' \
   -d '{"title": "Buy milk", "dueDate": "2026-12-01"}'
+```
+
+## Changing the API contract (SCRUM-12)
+
+**Where it lives.** [`api/openapi.yaml`](api/openapi.yaml) (OpenAPI 3.1, canonical YAML) is the reviewed contract of
+the Task API ([ADR 0017](docs/adr/0017-api-contract-openapi.md)). It is generated **code-first** from
+`TaskController`, the DTO records and their documentation annotations (`@Operation`, `@ApiResponse`, `@Schema`,
+JSpecify `@Nullable`) by springdoc — a **test-scope** dependency, so the released jar/image serves no
+`/v3/api-docs` or Swagger UI (checked by `verify-jar.sh`, `OpenApiExposureIntegrationTest` and an e2e test). Every
+consumer reads the committed file: the backend conformance tests, the generated frontend types
+(`frontend/src/api/schema.d.ts`), the MSW handler validation and the breaking-change gate.
+
+**Changing an endpoint** (path, parameter, body, status code):
+
+1. Change the controller/DTO code **and** its annotations (every status an operation can return needs an
+   `@ApiResponse`; `500` is declared once on the class). If the change adds a status, add a scenario to
+   `TaskApiContractIntegrationTest.SCENARIOS`.
+2. Regenerate the document (JDK 21 + Docker): `./mvnw -B test -Dtest=OpenApiDriftIntegrationTest -Dopenapi.update=true`,
+   then review `git diff api/openapi.yaml`. Without a local build: push, and copy the generated document from the
+   failing `build` job — the step *OpenAPI drift diff* prints it between `----- BEGIN generated api/openapi.yaml -----`
+   and `----- END … -----` (also base64, and in the artifact `todo-backend-<key>-<sha>-reports`, `target/openapi/`).
+3. Regenerate the frontend types: `npm --prefix frontend run api:types`; fix what `npm run typecheck` reports (the
+   `ContractChecks` in `frontend/src/api/types.ts`), the API client and the MSW handlers/fixtures
+   (`frontend/src/test/handlers.ts`, `fixtures.ts`) until `npm test` passes.
+4. If the change is breaking for existing clients, acknowledge it (below). Commit code, `api/openapi.yaml`,
+   `schema.d.ts` and the acknowledgment together.
+
+**Reading a failure.**
+
+| Check (CI job) | Message starts with | Meaning / fix |
+|---|---|---|
+| Drift (`build`) | `SCRUM-12-AC-05: contract drift` + unified diff (also in the job summary) | The code generates a different document than the committed one. Intended → step 2; otherwise fix the code/annotations. |
+| Canonical form (`build`) | `SCRUM-12-NFR-03: api/openapi.yaml is not in canonical form` | Hand-edited formatting/order; regenerate (step 2). |
+| Conformance (`build`) | `SCRUM-12-AC-03: response of <METHOD> <uri> does not conform` + `METHOD /template (operationId) status: …` lines with JSON pointers | The running app answered with an undocumented status, header, media type or property, or a wrong type/enum. |
+| Endpoint parity / exercised pairs (`build`) | `SCRUM-12-AC-04: …` | An `/api/**` mapping is not documented (or vice versa), or a documented `(operation, status)` has no scenario. |
+| Frontend types (`frontend`) | `npm run api:check` shows a diff of `schema.d.ts` | Run `npm --prefix frontend run api:types` and commit. |
+| Frontend type assertions (`frontend`) | `Type 'false' does not satisfy the constraint 'true'` in `types.ts` | The contract changed incompatibly with the UI types: fix the UI types/code. |
+| MSW validation (`frontend`) | `SCRUM-12-AC-07: default handler response conforms — …` with `METHOD /template (operationId) status: …` | A test double returns something the backend never would; fix `handlers.ts`/`fixtures.ts`. |
+| Breaking change (`api-contract`) | `SCRUM-12-AC-08: [rule-id] METHOD /path: text` + `ack line: …` | An unacknowledged breaking change against `main` (merge base); job summary lists all changes. |
+
+**Acknowledging an intended breaking change.** Add the line the gate prints to
+[`api/breaking-changes.ack`](api/breaking-changes.ack) and replace the placeholder justification:
+`<JIRA-KEY> <METHOD> <path> <oasdiff text, verbatim> -- <why this break is acceptable>` — one line per change, matched
+exactly on method, path and text. On a feature branch/PR only entries with the branch's Jira key count; malformed
+lines fail the job; entries that no longer match are reported as warnings — remove them in the next story. The file
+is reviewed in the PR diff and works the same for `push` and `pull_request` runs and squash merges. When `main` has
+no `api/openapi.yaml` yet (SCRUM-12 itself), the check passes with a notice.
+
+**Run the checks locally.**
+
+```bash
+./mvnw verify                                             # drift, canonical form, conformance, parity, exposure (JDK 21 + Docker)
+npm --prefix frontend run api:check                       # schema.d.ts up to date
+(cd frontend && npm run typecheck && npm test)            # ContractChecks, MSW/fixture validation (src/test/contract.test.ts)
+node --test ".github/scripts/api/test/*.test.mjs"         # breaking-change gate self-tests
+.github/scripts/release/install-tools.sh oasdiff && PATH="$PWD/.tools/bin:$PATH" OUT=/tmp/api-contract \
+  EVENT_NAME=push REF_NAME="$(git branch --show-current)" JIRA_KEY=SCRUM-<n> .github/scripts/api-contract.sh
 ```
 
 ## Test layers (SCRUM-7)

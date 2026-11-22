@@ -35,3 +35,10 @@ management:
   info:
     git:
       mode: full
+# SCRUM-12 / ADR 0017: springdoc-openapi is a TEST-scope dependency and never in the jar. Should it ever reach the
+# runtime classpath, these defaults keep the OpenAPI endpoints and the UI off. Contract tests enable profile "openapi".
+springdoc:
+  api-docs:
+    enabled: false
+  swagger-ui:
+    enabled: false

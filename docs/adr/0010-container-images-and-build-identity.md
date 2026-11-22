@@ -103,6 +103,9 @@ Docker can run the stack. Constraints:
   to `root` for `apk` and back to `101:101`. Remove each floor in the base-image bump that already contains it. See
   [ADR 0016](0016-medium-findings-and-os-package-floors.md), [SCRUM-11 design](../architecture/SCRUM-11-design.md),
   [the SCRUM-11 matrix](../traceability/SCRUM-11.md).
+- **SCRUM-12 (2026-11-22):** two more floors (same ADR 0016 §2 rule) after new HIGH findings blocked the Release
+  dry-run `scan` (run 44994305133): backend `libfontenc>=1.1.10-r0` (CVE-2026-109908), frontend `libxml2>=2.13.9-r3`
+  (CVE-2026-86144). Remove them with the base-image bump that already contains them.
 
 ### Image structure
 

@@ -1,0 +1,87 @@
+[
+  {
+    "id": "response-required-property-removed",
+    "text": "removed the required property `items/items/dueDate` from the response with the `200` status",
+    "level": 3,
+    "operation": "GET",
+    "operationId": "listTasks",
+    "path": "/api/tasks",
+    "section": "paths",
+    "baseSource": {
+      "file": "base.yaml",
+      "line": 378,
+      "column": 9,
+      "endLine": 382,
+      "endColumn": 19
+    },
+    "fingerprint": "5ce2a02eeb43"
+  },
+  {
+    "id": "response-required-property-removed",
+    "text": "removed the required property `dueDate` from the response with the `201` status",
+    "level": 3,
+    "operation": "POST",
+    "operationId": "createTask",
+    "path": "/api/tasks",
+    "section": "paths",
+    "baseSource": {
+      "file": "base.yaml",
+      "line": 378,
+      "column": 9,
+      "endLine": 382,
+      "endColumn": 19
+    },
+    "fingerprint": "86d2420d4d86"
+  },
+  {
+    "id": "response-required-property-removed",
+    "text": "removed the required property `dueDate` from the response with the `200` status",
+    "level": 3,
+    "operation": "GET",
+    "operationId": "getTask",
+    "path": "/api/tasks/{id}",
+    "section": "paths",
+    "baseSource": {
+      "file": "base.yaml",
+      "line": 378,
+      "column": 9,
+      "endLine": 382,
+      "endColumn": 19
+    },
+    "fingerprint": "df8ea4442782"
+  },
+  {
+    "id": "response-required-property-removed",
+    "text": "removed the required property `dueDate` from the response with the `200` status",
+    "level": 3,
+    "operation": "PUT",
+    "operationId": "updateTask",
+    "path": "/api/tasks/{id}",
+    "section": "paths",
+    "baseSource": {
+      "file": "base.yaml",
+      "line": 378,
+      "column": 9,
+      "endLine": 382,
+      "endColumn": 19
+    },
+    "fingerprint": "cad48c0e2005"
+  },
+  {
+    "id": "response-required-property-removed",
+    "text": "removed the required property `dueDate` from the response with the `200` status",
+    "level": 3,
+    "operation": "PATCH",
+    "operationId": "updateTaskStatus",
+    "path": "/api/tasks/{id}/status",
+    "section": "paths",
+    "baseSource": {
+      "file": "base.yaml",
+      "line": 378,
+      "column": 9,
+      "endLine": 382,
+      "endColumn": 19
+    },
+    "fingerprint": "b8be0f84ab0b"
+  }
+]
