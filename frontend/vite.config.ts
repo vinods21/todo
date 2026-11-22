@@ -1,7 +1,7 @@
 /// <reference types="vitest/config" />
 import { execSync } from 'node:child_process'
 import react from '@vitejs/plugin-react'
-import { defineConfig, type Plugin } from 'vite'
+import { defineConfig, searchForWorkspaceRoot, type Plugin } from 'vite'
 
 // SCRUM-1-NFR-09: build identity (Jira key, git commit, branch, build time); SCRUM-8: + version.
 function git(args: string): string | undefined {
@@ -64,7 +64,13 @@ export default defineConfig({
   },
   // SCRUM-1-AC-14: the backend's default CORS origin is http://localhost:5173 — fail rather than drift to 5174.
   // No proxy (A-02): the browser calls VITE_API_BASE_URL cross-origin.
-  server: { port: 5173, strictPort: true },
+  // SCRUM-12 (ADR 0017): Vitest imports the committed contract ../api/openapi.yaml (`?raw`, src/test/contract.ts). Test
+  // runs only — the dev server keeps Vite's default fs.allow, and neither the Docker build nor `vite build` reads it.
+  server: {
+    port: 5173,
+    strictPort: true,
+    ...(process.env.VITEST ? { fs: { allow: [searchForWorkspaceRoot(process.cwd()), '../api'] } } : {}),
+  },
   preview: { port: 4173 },
   build: { sourcemap: true },
   test: {

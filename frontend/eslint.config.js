@@ -7,7 +7,8 @@ import tseslint from 'typescript-eslint'
 import { defineConfig, globalIgnores } from 'eslint/config'
 
 export default defineConfig([
-  globalIgnores(['dist', 'reports', 'coverage']),
+  // SCRUM-12: src/api/schema.d.ts is generated from api/openapi.yaml (npm run api:types) — not subject to our rules
+  globalIgnores(['dist', 'reports', 'coverage', 'src/api/schema.d.ts']),
   {
     files: ['**/*.{ts,tsx}'],
     extends: [

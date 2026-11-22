@@ -231,3 +231,21 @@ test('SCRUM-7-NFR-12: responses carry security headers and hide the nginx versio
     expect(headers['server'], path).toBe('nginx')
   }
 })
+
+// SCRUM-12-AC-10 (ADR 0017, design §4.6): the backend image has no OpenAPI generator (test scope only) and nginx forwards
+// only /api/ and /actuator/health. /v3/api-docs through nginx is an ordinary SPA route (index.html, never JSON); paths
+// with a file extension are files or 404.
+test('SCRUM-12-AC-10: no OpenAPI document or UI is served by the backend image or through the frontend', async ({
+  request,
+}) => {
+  for (const path of ['/v3/api-docs', '/v3/api-docs.yaml', '/swagger-ui.html', '/swagger-ui/index.html']) {
+    await expectApiError(await request.get(`${env.backendURL}${path}`), 404, path)
+  }
+  const spa = await request.get('/v3/api-docs')
+  expectHtmlIndex(spa, await spa.text())
+  for (const path of ['/v3/api-docs.yaml', '/swagger-ui.html', '/swagger-ui/index.html']) {
+    const response = await request.get(path)
+    expect(response.status(), path).toBe(404)
+    expect(await response.text(), path).not.toContain('openapi')
+  }
+})
