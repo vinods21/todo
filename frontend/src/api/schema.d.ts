@@ -104,6 +104,7 @@ export interface components {
             /** Format: date */
             dueDate?: string | null;
             status?: components["schemas"]["TaskStatus"] | null;
+            /** @description Not blank after trimming; at most 200 characters */
             title: string;
         };
         TaskResponse: {
@@ -127,6 +128,7 @@ export interface components {
             /** Format: date */
             dueDate?: string | null;
             status: components["schemas"]["TaskStatus"];
+            /** @description Not blank after trimming; at most 200 characters */
             title: string;
         };
     };

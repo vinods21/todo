@@ -1,18 +1,18 @@
 openapi: 3.1.0
 info:
-  description: 'Task REST API of the To-Do application (SCRUM-2, SCRUM-6). Every error response uses the ApiError body (ADR 0003). Contract: ADR 0017.'
+  description: "Task REST API of the To-Do application (SCRUM-2, SCRUM-6). Every error response uses the ApiError body (ADR 0003). Contract: ADR 0017."
   title: To-Do Task API
-  version: '1'
+  version: "1"
 servers:
-- description: 'Same origin: nginx proxies /api/** to the backend (ADR 0011)'
+- description: "Same origin: nginx proxies /api/** to the backend (ADR 0011)"
   url: /
 tags:
-- description: Create, read, list, update, change the status of and delete tasks
+- description: "Create, read, list, update, change the status of and delete tasks"
   name: Tasks
 paths:
   /api/tasks:
     get:
-      description: Newest first (createdAt DESC, id DESC). size > 100 is clamped to 100. status filters by exactly one exact, case-sensitive enum name; empty, repeated, comma-separated, unknown or wrong-case values are rejected (ADR 0009).
+      description: "Newest first (createdAt DESC, id DESC). size > 100 is clamped to 100. status filters by exactly one exact, case-sensitive enum name; empty, repeated, comma-separated, unknown or wrong-case values are rejected (ADR 0009)."
       operationId: listTasks
       parameters:
       - description: 0-based page index
@@ -38,25 +38,25 @@ paths:
         name: status
         required: false
         schema:
-          $ref: '#/components/schemas/TaskStatus'
+          $ref: "#/components/schemas/TaskStatus"
       responses:
-        '200':
+        "200":
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/PageResponseTaskResponse'
+                $ref: "#/components/schemas/PageResponseTaskResponse"
           description: One page of tasks
-        '400':
+        "400":
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/ApiError'
-          description: Invalid page, size or status
-        '500':
+                $ref: "#/components/schemas/ApiError"
+          description: "Invalid page, size or status"
+        "500":
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/ApiError'
+                $ref: "#/components/schemas/ApiError"
           description: Unexpected error
       summary: List tasks
       tags:
@@ -67,14 +67,14 @@ paths:
         content:
           application/json:
             schema:
-              $ref: '#/components/schemas/TaskCreateRequest'
+              $ref: "#/components/schemas/TaskCreateRequest"
         required: true
       responses:
-        '201':
+        "201":
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/TaskResponse'
+                $ref: "#/components/schemas/TaskResponse"
           description: Task created
           headers:
             Location:
@@ -83,23 +83,24 @@ paths:
               schema:
                 format: uri
                 type: string
-        '400':
+              style: simple
+        "400":
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/ApiError'
-          description: Validation failed, malformed JSON or invalid field value
-        '415':
+                $ref: "#/components/schemas/ApiError"
+          description: "Validation failed, malformed JSON or invalid field value"
+        "415":
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/ApiError'
+                $ref: "#/components/schemas/ApiError"
           description: Content type is not application/json
-        '500':
+        "500":
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/ApiError'
+                $ref: "#/components/schemas/ApiError"
           description: Unexpected error
       summary: Create a task
       tags:
@@ -115,25 +116,25 @@ paths:
           format: int64
           type: integer
       responses:
-        '204':
+        "204":
           description: Task deleted
-        '400':
+        "400":
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/ApiError'
+                $ref: "#/components/schemas/ApiError"
           description: Non-numeric id
-        '404':
+        "404":
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/ApiError'
+                $ref: "#/components/schemas/ApiError"
           description: Task not found
-        '500':
+        "500":
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/ApiError'
+                $ref: "#/components/schemas/ApiError"
           description: Unexpected error
       summary: Delete a task
       tags:
@@ -148,35 +149,35 @@ paths:
           format: int64
           type: integer
       responses:
-        '200':
+        "200":
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/TaskResponse'
+                $ref: "#/components/schemas/TaskResponse"
           description: The task
-        '400':
+        "400":
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/ApiError'
+                $ref: "#/components/schemas/ApiError"
           description: Non-numeric id
-        '404':
+        "404":
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/ApiError'
+                $ref: "#/components/schemas/ApiError"
           description: Task not found
-        '500':
+        "500":
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/ApiError'
+                $ref: "#/components/schemas/ApiError"
           description: Unexpected error
       summary: Get a task
       tags:
       - Tasks
     put:
-      description: Full replacement of title, description, status and dueDate; id and createdAt are unchanged.
+      description: "Full replacement of title, description, status and dueDate; id and createdAt are unchanged."
       operationId: updateTask
       parameters:
       - in: path
@@ -189,38 +190,38 @@ paths:
         content:
           application/json:
             schema:
-              $ref: '#/components/schemas/TaskUpdateRequest'
+              $ref: "#/components/schemas/TaskUpdateRequest"
         required: true
       responses:
-        '200':
+        "200":
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/TaskResponse'
+                $ref: "#/components/schemas/TaskResponse"
           description: The updated task
-        '400':
+        "400":
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/ApiError'
-          description: Validation failed, malformed JSON, invalid field value or non-numeric id
-        '404':
+                $ref: "#/components/schemas/ApiError"
+          description: "Validation failed, malformed JSON, invalid field value or non-numeric id"
+        "404":
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/ApiError'
+                $ref: "#/components/schemas/ApiError"
           description: Task not found
-        '415':
+        "415":
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/ApiError'
+                $ref: "#/components/schemas/ApiError"
           description: Content type is not application/json
-        '500':
+        "500":
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/ApiError'
+                $ref: "#/components/schemas/ApiError"
           description: Unexpected error
       summary: Replace a task
       tags:
@@ -240,38 +241,38 @@ paths:
         content:
           application/json:
             schema:
-              $ref: '#/components/schemas/TaskStatusUpdateRequest'
+              $ref: "#/components/schemas/TaskStatusUpdateRequest"
         required: true
       responses:
-        '200':
+        "200":
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/TaskResponse'
+                $ref: "#/components/schemas/TaskResponse"
           description: The updated task
-        '400':
+        "400":
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/ApiError'
-          description: Missing, null or invalid status, malformed JSON or non-numeric id
-        '404':
+                $ref: "#/components/schemas/ApiError"
+          description: "Missing, null or invalid status, malformed JSON or non-numeric id"
+        "404":
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/ApiError'
+                $ref: "#/components/schemas/ApiError"
           description: Task not found
-        '415':
+        "415":
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/ApiError'
+                $ref: "#/components/schemas/ApiError"
           description: Content type is not application/json
-        '500':
+        "500":
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/ApiError'
+                $ref: "#/components/schemas/ApiError"
           description: Unexpected error
       summary: Change the status of a task
       tags:
@@ -287,7 +288,7 @@ components:
         fieldErrors:
           description: Invalid fields; empty when the error is not a validation failure
           items:
-            $ref: '#/components/schemas/FieldErrorItem'
+            $ref: "#/components/schemas/FieldErrorItem"
           type: array
         message:
           type: string
@@ -321,7 +322,7 @@ components:
       properties:
         items:
           items:
-            $ref: '#/components/schemas/TaskResponse'
+            $ref: "#/components/schemas/TaskResponse"
           type: array
         page:
           format: int32
@@ -349,19 +350,20 @@ components:
           minLength: 0
           type:
           - string
-          - 'null'
+          - "null"
         dueDate:
           format: date
           type:
           - string
-          - 'null'
+          - "null"
         status:
           oneOf:
-          - $ref: '#/components/schemas/TaskStatus'
-          - type: 'null'
+          - $ref: "#/components/schemas/TaskStatus"
+          - type: "null"
         title:
+          description: Not blank after trimming; at most 200 characters
           maxLength: 200
-          minLength: 1
+          minLength: 0
           type: string
       required:
       - title
@@ -374,17 +376,17 @@ components:
         description:
           type:
           - string
-          - 'null'
+          - "null"
         dueDate:
           format: date
           type:
           - string
-          - 'null'
+          - "null"
         id:
           format: int64
           type: integer
         status:
-          $ref: '#/components/schemas/TaskStatus'
+          $ref: "#/components/schemas/TaskStatus"
         title:
           type: string
       required:
@@ -404,7 +406,7 @@ components:
     TaskStatusUpdateRequest:
       properties:
         status:
-          $ref: '#/components/schemas/TaskStatus'
+          $ref: "#/components/schemas/TaskStatus"
       required:
       - status
       type: object
@@ -415,17 +417,18 @@ components:
           minLength: 0
           type:
           - string
-          - 'null'
+          - "null"
         dueDate:
           format: date
           type:
           - string
-          - 'null'
+          - "null"
         status:
-          $ref: '#/components/schemas/TaskStatus'
+          $ref: "#/components/schemas/TaskStatus"
         title:
+          description: Not blank after trimming; at most 200 characters
           maxLength: 200
-          minLength: 1
+          minLength: 0
           type: string
       required:
       - status
