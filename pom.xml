@@ -31,7 +31,26 @@
         <git-commit-id-plugin.version>9.0.1</git-commit-id-plugin.version>
         <!-- SCRUM-8-AC-17 / ADR 0014: application SBOMs (makeBom@runtime, makeBom@all-scopes; not bound to a phase) -->
         <cyclonedx-maven-plugin.version>2.9.3</cyclonedx-maven-plugin.version>
+        <!-- SCRUM-12 / ADR 0017 (design §2.1): OpenAPI generation is test-scope only -->
+        <springdoc.version>3.2.0</springdoc.version> <!-- built on Boot 4.1.2; NOT 3.2.1 (Boot 4.2) -->
+        <json-schema-validator.version>3.0.9</json-schema-validator.version> <!-- Jackson 3, OpenAPI 3.1 dialect -->
+        <java-diff-utils.version>4.18</java-diff-utils.version>
+        <!-- SCRUM-12-AC-05: -Dopenapi.update=true rewrites api/openapi.yaml from the generated document -->
+        <openapi.update>false</openapi.update>
     </properties>
+
+    <dependencyManagement>
+        <dependencies>
+            <!-- SCRUM-12: manages springdoc-* and swagger-annotations-jakarta (2.2.55) in lockstep -->
+            <dependency>
+                <groupId>org.springdoc</groupId>
+                <artifactId>springdoc-openapi-bom</artifactId>
+                <version>${springdoc.version}</version>
+                <type>pom</type>
+                <scope>import</scope>
+            </dependency>
+        </dependencies>
+    </dependencyManagement>
 
     <dependencies>
         <!-- SCRUM-2-NFR-02: all versions managed by the Spring Boot 4.1.2 BOM -->
@@ -65,6 +84,11 @@
             <artifactId>postgresql</artifactId>
             <scope>runtime</scope>
         </dependency>
+        <!-- SCRUM-12-NFR-01 (ADR 0017): annotations only (no transitive dependencies) — the only runtime addition -->
+        <dependency>
+            <groupId>io.swagger.core.v3</groupId>
+            <artifactId>swagger-annotations-jakarta</artifactId>
+        </dependency>
 
         <!-- Tests (SCRUM-2-AC-16, SCRUM-2-NFR-03) -->
         <dependency>
@@ -90,6 +114,29 @@
         <dependency>
             <groupId>org.testcontainers</groupId>
             <artifactId>testcontainers-postgresql</artifactId>
+            <scope>test</scope>
+        </dependency>
+        <!-- SCRUM-12 (test only, ADR 0017): generator, response validator, YAML, diff -->
+        <dependency>
+            <groupId>org.springdoc</groupId>
+            <artifactId>springdoc-openapi-starter-webmvc-api</artifactId> <!-- -api: no Swagger UI webjar -->
+            <scope>test</scope>
+        </dependency>
+        <dependency>
+            <groupId>com.networknt</groupId>
+            <artifactId>json-schema-validator</artifactId>
+            <version>${json-schema-validator.version}</version>
+            <scope>test</scope>
+        </dependency>
+        <dependency>
+            <groupId>tools.jackson.dataformat</groupId>
+            <artifactId>jackson-dataformat-yaml</artifactId> <!-- version: Spring Boot BOM (Jackson 3) -->
+            <scope>test</scope>
+        </dependency>
+        <dependency>
+            <groupId>io.github.java-diff-utils</groupId>
+            <artifactId>java-diff-utils</artifactId>
+            <version>${java-diff-utils.version}</version>
             <scope>test</scope>
         </dependency>
     </dependencies>
@@ -177,6 +224,8 @@
                         <build.jira.expected>${jira.issue}</build.jira.expected>
                         <!-- SCRUM-8-AC-04: /actuator/info build.version == the version the build was stamped with -->
                         <build.version.expected>${project.version}</build.version.expected>
+                        <!-- SCRUM-12-AC-05: OpenApiDriftIntegrationTest rewrites api/openapi.yaml when true -->
+                        <openapi.update>${openapi.update}</openapi.update>
                     </systemPropertyVariables>
                 </configuration>
             </plugin>

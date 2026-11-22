@@ -5,19 +5,20 @@ import com.vinods21.todo.domain.TaskStatus;
 import jakarta.validation.constraints.NotBlank;
 import jakarta.validation.constraints.NotNull;
 import jakarta.validation.constraints.Size;
+import org.jspecify.annotations.Nullable;
 
 import java.time.LocalDate;
 
 /**
  * Body of {@code PUT /api/tasks/{id}} — full replacement (A-05); {@code status} is required.
- * Client-sent {@code id}/{@code createdAt} are ignored (SCRUM-2-AC-12).
+ * Client-sent {@code id}/{@code createdAt} are ignored (SCRUM-2-AC-12). SCRUM-12: {@code @Nullable} is documentation.
  */
 @JsonIgnoreProperties(ignoreUnknown = true)
 public record TaskUpdateRequest(
         @NotBlank @Size(max = 200) String title,
-        @Size(max = 2000) String description,
+        @Size(max = 2000) @Nullable String description,
         @NotNull TaskStatus status,
-        LocalDate dueDate) {
+        @Nullable LocalDate dueDate) {
 
     public TaskUpdateRequest {
         title = title == null ? null : title.strip();
