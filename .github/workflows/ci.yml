@@ -92,6 +92,9 @@ jobs:
           ./mvnw -B -ntp dependency:tree -Dscope=runtime "-Drevision=${BUILD_VERSION}" > target/dependency-tree-runtime.txt
           echo "OpenAPI / Jackson artefacts on the runtime classpath:"
           grep -iE 'swagger|springdoc|jackson' target/dependency-tree-runtime.txt || true
+          # SCRUM-13-NFR-03: the resource-server stack is the only new runtime addition (Spring Security + Nimbus JOSE).
+          echo "Security artefacts on the runtime classpath (SCRUM-13-NFR-03):"
+          grep -iE 'security|nimbus|jcip|oauth2' target/dependency-tree-runtime.txt || true
 
       - name: Coverage summary
         if: always()
@@ -338,6 +341,15 @@ jobs:
             BUILD_DATE=${{ steps.meta.outputs.build_date }}
           cache-from: type=gha,scope=todo-frontend
           cache-to: type=gha,scope=todo-frontend,mode=max
+
+      # SCRUM-13-AC-01, NFR-04: the Keycloak image (third-party dev/CI service, never built here) and its digest.
+      - name: Keycloak image and digest (SCRUM-13-AC-01, NFR-04)
+        run: |
+          image=$(docker compose config --format json | jq -r '.services.keycloak.image')
+          docker compose pull --quiet keycloak
+          echo "keycloak image: ${image}"
+          echo "repo digests:   $(docker image inspect -f '{{ join .RepoDigests " " }}' "$image")"
+          echo "- Keycloak image \`${image}\` → \`$(docker image inspect -f '{{ join .RepoDigests " " }}' "$image")\`" >> "$GITHUB_STEP_SUMMARY"
 
       - name: Start stack and wait for health (SCRUM-7-AC-07, AC-09)
         id: stack
