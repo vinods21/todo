@@ -2,11 +2,14 @@ import type { ApiErrorBody, FieldErrorItem } from './types'
 
 // SCRUM-1-AC-08, AC-10, AC-11: every failure leaving the API layer is an ApiError with a user-safe message.
 
-export type ApiErrorKind = 'network' | 'validation' | 'not-found' | 'server' | 'http'
+// SCRUM-13-AC-14: 'unauthorized' (401 after the one renewal + retry; a login has been started) and 'forbidden' (403).
+export type ApiErrorKind = 'network' | 'validation' | 'not-found' | 'server' | 'http' | 'unauthorized' | 'forbidden'
 
 export const GENERIC_ERROR_MESSAGE = 'Something went wrong. Please try again.'
 export const NETWORK_ERROR_MESSAGE = 'Could not reach the server. Check your connection and try again.'
 export const NOT_FOUND_MESSAGE = 'Task not found'
+export const SESSION_EXPIRED_MESSAGE = 'Your session has expired. Signing you in again…'
+export const FORBIDDEN_MESSAGE = 'You do not have access to this application'
 
 export class ApiError extends Error {
   override readonly name = 'ApiError'
@@ -63,6 +66,12 @@ export async function toApiError(response: Response): Promise<ApiError> {
   }
   if (status === 404) {
     return new ApiError('not-found', status, NOT_FOUND_MESSAGE)
+  }
+  if (status === 401) {
+    return new ApiError('unauthorized', status, SESSION_EXPIRED_MESSAGE)
+  }
+  if (status === 403) {
+    return new ApiError('forbidden', status, FORBIDDEN_MESSAGE)
   }
   const body = await readErrorBody(response)
   if (status === 400) {
