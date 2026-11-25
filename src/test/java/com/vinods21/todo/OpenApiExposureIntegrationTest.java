@@ -1,5 +1,6 @@
 package com.vinods21.todo;
 
+import com.vinods21.todo.support.AuthTestConfiguration;
 import com.vinods21.todo.support.PostgresTestcontainersConfiguration;
 import com.vinods21.todo.support.RealHttp;
 import org.junit.jupiter.api.BeforeEach;
@@ -22,7 +23,7 @@ import static com.vinods21.todo.support.RealHttp.assertApiErrorShape;
 @Tag("SCRUM-12")
 @DisplayName("SCRUM-12 no OpenAPI endpoints without the openapi profile")
 @SpringBootTest(webEnvironment = SpringBootTest.WebEnvironment.RANDOM_PORT)
-@Import(PostgresTestcontainersConfiguration.class)
+@Import({PostgresTestcontainersConfiguration.class, AuthTestConfiguration.class}) // SCRUM-13: in-test JWT issuer
 class OpenApiExposureIntegrationTest {
 
     @LocalServerPort

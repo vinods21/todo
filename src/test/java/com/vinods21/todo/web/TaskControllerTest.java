@@ -3,7 +3,10 @@ package com.vinods21.todo.web;
 import com.vinods21.todo.domain.Task;
 import com.vinods21.todo.domain.TaskStatus;
 import com.vinods21.todo.service.TaskNotFoundException;
+import com.vinods21.todo.config.SecurityConfig;
 import com.vinods21.todo.service.TaskService;
+import com.vinods21.todo.web.security.ApiErrorAccessDeniedHandler;
+import com.vinods21.todo.web.security.ApiErrorAuthenticationEntryPoint;
 import com.vinods21.todo.web.dto.TaskCreateRequest;
 import com.vinods21.todo.web.dto.TaskUpdateRequest;
 import org.junit.jupiter.api.DisplayName;
@@ -15,10 +18,12 @@ import org.junit.jupiter.params.provider.ValueSource;
 import org.mockito.ArgumentCaptor;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.webmvc.test.autoconfigure.WebMvcTest;
+import org.springframework.context.annotation.Import;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.PageImpl;
 import org.springframework.data.domain.PageRequest;
 import org.springframework.http.MediaType;
+import org.springframework.security.test.context.support.WithMockUser;
 import org.springframework.test.context.bean.override.mockito.MockitoBean;
 import org.springframework.test.util.ReflectionTestUtils;
 import org.springframework.test.web.servlet.MockMvc;
@@ -58,6 +63,9 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 @Tag("SCRUM-2")
 @DisplayName("SCRUM-2 TaskController")
 @WebMvcTest(TaskController.class)
+// SCRUM-13-AC-23, AC-35: the real security rules; every test runs as a user with the application role (bodies unchanged)
+@Import({SecurityConfig.class, ApiErrorAuthenticationEntryPoint.class, ApiErrorAccessDeniedHandler.class})
+@WithMockUser(roles = "todo-user")
 class TaskControllerTest {
 
     private static final Instant CREATED = Instant.parse("2026-11-17T10:15:30Z");

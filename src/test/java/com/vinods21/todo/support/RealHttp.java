@@ -30,12 +30,25 @@ public final class RealHttp {
             List.of("Exception", "trace", "org.springframework", "java.", "at com.");
 
     private final RestClient client;
+    private final String bearerToken;
 
+    /** SCRUM-13: authenticated as alice with role todo-user (TestJwtIssuer) — the default for behaviour tests. */
     public RealHttp(int port) {
+        this(port, TestJwtIssuer.userToken());
+    }
+
+    /** SCRUM-13: every request carries {@code Authorization: Bearer <bearerToken>}; null = anonymous. */
+    public RealHttp(int port, String bearerToken) {
         this.client = RestClient.builder()
                 .baseUrl("http://localhost:" + port)
                 .requestFactory(new JdkClientHttpRequestFactory())
                 .build();
+        this.bearerToken = bearerToken;
+    }
+
+    /** SCRUM-13: no Authorization header at all. */
+    public static RealHttp anonymous(int port) {
+        return new RealHttp(port, null);
     }
 
     public ResponseEntity<String> exchange(HttpMethod method, String uri, String contentType, String body,
@@ -44,6 +57,9 @@ public final class RealHttp {
         // Like the SPA's API client (ADR 0006): JSON accepted, English messages.
         spec = spec.header(HttpHeaders.ACCEPT, MediaType.APPLICATION_JSON_VALUE)
                 .header(HttpHeaders.ACCEPT_LANGUAGE, "en");
+        if (bearerToken != null && !headers.containsKey(HttpHeaders.AUTHORIZATION)) {
+            spec = spec.header(HttpHeaders.AUTHORIZATION, "Bearer " + bearerToken);
+        }
         for (Map.Entry<String, String> header : headers.entrySet()) {
             spec = spec.header(header.getKey(), header.getValue());
         }

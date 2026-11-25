@@ -14,6 +14,22 @@ spring:
   flyway:
     enabled: true
     locations: classpath:db/migration
+  security:
+    oauth2:
+      resourceserver:
+        jwt:
+          # SCRUM-13 (ADR 0018 §1): the PUBLIC issuer is validated (iss); keys come from the jwk-set-uri (in Compose the
+          # internal http://keycloak:8080/...). With both set, Boot builds the decoder from jwk-set-uri: no discovery
+          # call, no start-up dependency on Keycloak (NFR-06). JWKS fetched lazily, cached, re-fetched on unknown kid.
+          issuer-uri: ${APP_AUTH_ISSUER_URI:http://localhost:8180/realms/todo}
+          jwk-set-uri: ${APP_AUTH_JWK_SET_URI:http://localhost:8180/realms/todo/protocol/openid-connect/certs}
+          jws-algorithms: [RS256]
+          audiences:                                                        # SCRUM-13-AC-18: aud must contain it
+            - "${APP_AUTH_AUDIENCE:todo-api}"
+          # SCRUM-13-AC-22: Keycloak realm roles -> ROLE_<role>; no realm_access claim = no roles (no error)
+          authorities-claim-expressions: ["['realm_access']['roles']"]
+          authority-prefix: ROLE_
+          principal-claim-name: preferred_username
   web:
     # Boot 4 location of the former server.error.* keys (SCRUM-2-AC-14 backstop for errors outside MVC)
     error:
@@ -24,6 +40,9 @@ server:
 app:
   cors:
     allowed-origins: ${APP_CORS_ALLOWED_ORIGINS:http://localhost:5173}
+  auth:
+    clock-skew: ${APP_AUTH_CLOCK_SKEW:30s}   # SCRUM-13-AC-18: exp/nbf tolerance (max 60s); CI e2e uses 5s
+    roles: [todo-user, todo-admin]           # SCRUM-13-AC-21: application roles reported by GET /api/me
 management:
   endpoints:
     web:

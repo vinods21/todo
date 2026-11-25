@@ -25,7 +25,8 @@ public class WebConfig implements WebMvcConfigurer {
                 .allowedOrigins(corsProperties.allowedOrigins().toArray(String[]::new))
                 .allowedMethods("GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS")
                 .allowedHeaders("*")
-                .exposedHeaders("Location")
+                // SCRUM-13: WWW-Authenticate readable by dev-mode (cross-origin) clients on 401/403
+                .exposedHeaders("Location", "WWW-Authenticate")
                 .maxAge(3600);
     }
 }

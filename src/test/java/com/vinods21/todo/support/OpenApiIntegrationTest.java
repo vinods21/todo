@@ -22,6 +22,6 @@ import java.lang.annotation.Target;
 @Tag("SCRUM-12")
 @SpringBootTest(webEnvironment = SpringBootTest.WebEnvironment.RANDOM_PORT)
 @ActiveProfiles("openapi")
-@Import(PostgresTestcontainersConfiguration.class)
+@Import({PostgresTestcontainersConfiguration.class, AuthTestConfiguration.class}) // SCRUM-13: in-test JWT issuer
 public @interface OpenApiIntegrationTest {
 }

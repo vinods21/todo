@@ -1,5 +1,6 @@
 package com.vinods21.todo.web;
 
+import com.vinods21.todo.config.OpenApiDefinitionConfig;
 import com.vinods21.todo.domain.Task;
 import com.vinods21.todo.domain.TaskStatus;
 import com.vinods21.todo.service.TaskService;
@@ -15,6 +16,7 @@ import io.swagger.v3.oas.annotations.headers.Header;
 import io.swagger.v3.oas.annotations.media.Content;
 import io.swagger.v3.oas.annotations.media.Schema;
 import io.swagger.v3.oas.annotations.responses.ApiResponse;
+import io.swagger.v3.oas.annotations.security.SecurityRequirement;
 import io.swagger.v3.oas.annotations.tags.Tag;
 import jakarta.validation.Valid;
 import jakarta.validation.constraints.Min;
@@ -53,6 +55,17 @@ import java.net.URI;
 @RequestMapping("/api/tasks")
 @Tag(name = "Tasks", description = "Create, read, list, update, change the status of and delete tasks")
 @ApiResponse(responseCode = "500", description = "Unexpected error",
+        content = @Content(mediaType = TaskController.JSON, schema = @Schema(implementation = ApiError.class)))
+// SCRUM-13-AC-24 (ADR 0018 §5): bearer token on every operation; 401 without a valid one, 403 without role todo-user.
+@SecurityRequirement(name = OpenApiDefinitionConfig.BEARER_AUTH)
+@ApiResponse(responseCode = "401", description = "Missing, invalid or expired access token",
+        headers = @Header(name = HttpHeaders.WWW_AUTHENTICATE, required = true,
+                description = "Bearer challenge (RFC 6750)", schema = @Schema(type = "string")),
+        content = @Content(mediaType = TaskController.JSON, schema = @Schema(implementation = ApiError.class)))
+@ApiResponse(responseCode = "403", description = "The access token lacks the application role todo-user",
+        headers = @Header(name = HttpHeaders.WWW_AUTHENTICATE, required = true,
+                description = "Bearer challenge with error=\"insufficient_scope\" (RFC 6750)",
+                schema = @Schema(type = "string")),
         content = @Content(mediaType = TaskController.JSON, schema = @Schema(implementation = ApiError.class)))
 public class TaskController {
 
