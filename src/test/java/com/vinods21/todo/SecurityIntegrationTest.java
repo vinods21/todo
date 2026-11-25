@@ -273,6 +273,20 @@ class SecurityIntegrationTest {
         }
     }
 
+    @Test
+    @DisplayName("SCRUM-13-NFR-11: no extra response headers from Spring Security (nginx owns the security headers)")
+    void noSecurityHeadersFromTheBackend() {
+        List<ResponseEntity<String>> responses = List.of(getTasksWith(TestJwtIssuer.userToken()),
+                anonymous.get("/api/tasks"));
+        for (ResponseEntity<String> response : responses) {
+            HttpHeaders headers = response.getHeaders();
+            for (String name : List.of("X-Content-Type-Options", "X-Frame-Options", "X-XSS-Protection",
+                    "Cache-Control", "Pragma", "Expires", "Strict-Transport-Security")) {
+                assertThat(headers.getOrEmpty(name)).as("%s on %s", name, response.getStatusCode()).isEmpty();
+            }
+        }
+    }
+
     // ----------------------------------------------------------------------------------------- AC-21, AC-22 /api/me
 
     @Test

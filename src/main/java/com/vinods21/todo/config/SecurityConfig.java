@@ -85,6 +85,10 @@ public class SecurityConfig {
                 .requestCache(AbstractHttpConfigurer::disable)
                 .csrf(AbstractHttpConfigurer::disable)
                 .cors(Customizer.withDefaults()) // WebConfig's MVC CORS mappings (no CorsConfigurationSource bean)
+                // nginx (frontend image, ADR 0011) owns the security headers; Spring Security's defaults would duplicate
+                // them on proxied responses ("nosniff, nosniff", a doubled X-Frame-Options browsers may ignore — CI run
+                // 45669506278) and change the API's headers for authorised callers (SCRUM-13-NFR-11).
+                .headers(AbstractHttpConfigurer::disable)
                 .formLogin(AbstractHttpConfigurer::disable)
                 .httpBasic(AbstractHttpConfigurer::disable)
                 .logout(AbstractHttpConfigurer::disable);
