@@ -1,9 +1,11 @@
 // SCRUM-7-AC-19 (+ AC-02, AC-04..AC-06, NFR-12): HTTP-level smoke of the composed stack — request API only, no
 // browser. Project `http` (compose mode).
+// SCRUM-13: `test` is the authenticated variant (every request carries a todo-e2e bearer token); assertions unchanged.
 import http from 'node:http'
-import { expect, test, type APIResponse } from '@playwright/test'
+import { expect, type APIResponse } from '@playwright/test'
+import { authHeader } from './support/auth'
 import { env } from './support/env'
-import { API_ERROR_KEYS, expectedIdentity, TasksApi, uniqueTitle, type Task } from './support/fixtures'
+import { API_ERROR_KEYS, apiTest as test, expectedIdentity, TasksApi, uniqueTitle, type Task } from './support/fixtures'
 
 const origin = new URL(env.baseURL).origin
 
@@ -103,10 +105,13 @@ test('SCRUM-7-AC-06, SCRUM-7-AC-19: /actuator/health is proxied and UP; other ac
 })
 
 /** GET with the path sent byte-for-byte (Playwright's request API resolves "..", "%2e" etc. client-side). */
-function rawGet(path: string): Promise<{ status: number; contentType: string; body: string }> {
+function rawGet(
+  path: string,
+  headers: Record<string, string> = {},
+): Promise<{ status: number; contentType: string; body: string }> {
   const url = new URL(env.baseURL)
   return new Promise((resolve, reject) => {
-    const req = http.get({ host: url.hostname, port: url.port || 80, path }, (res) => {
+    const req = http.get({ host: url.hostname, port: url.port || 80, path, headers }, (res) => {
       let body = ''
       res.setEncoding('utf8')
       res.on('data', (chunk: string) => (body += chunk))
@@ -123,7 +128,7 @@ test('SCRUM-7-AC-06, SCRUM-7-NFR-12: encoded, traversal and path-parameter varia
   const health = await rawGet('/actuator/health')
   expect(health.status).toBe(200)
   expect(JSON.parse(health.body)).toMatchObject({ status: 'UP' })
-  expect((await rawGet('/api/tasks?size=1&q=a;b')).status).toBe(200)
+  expect((await rawGet('/api/tasks?size=1&q=a;b', await authHeader())).status).toBe(200) // SCRUM-13: authenticated
 
   for (const path of [
     '/actuator',
