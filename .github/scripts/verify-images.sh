@@ -71,7 +71,8 @@ for svc in backend frontend; do
 
   # 4. NFR-06: no secret-bearing build arguments or env files in the history.
   # `.env` only as a whole file name (the nginx base image legitimately ships `*.envsh` entrypoint scripts).
-  secret_re='DB_PASSWORD|POSTGRES_PASSWORD|NPM_TOKEN|_authToken|(^|[^[:alnum:]_])\.env([^[:alnum:]_]|$)'
+  # SCRUM-13-NFR-01: no Keycloak dev secret (dev-only-*, bootstrap admin) either.
+  secret_re='DB_PASSWORD|POSTGRES_PASSWORD|NPM_TOKEN|_authToken|dev-only-|KC_BOOTSTRAP_ADMIN|(^|[^[:alnum:]_])\.env([^[:alnum:]_]|$)'
   if hits=$(docker history --no-trunc --format '{{ .CreatedBy }}' "$img" | grep -E "$secret_re"); then
     fail "$svc: docker history mentions a secret-bearing value: $(echo "$hits" | head -n 3 | cut -c1-300)"; result="FAIL"
   fi
