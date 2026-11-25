@@ -38,7 +38,8 @@ services:
   # lives in the container's writable layer — it survives stop/start/restart, and is gone after `down` (and `down -v`);
   # brokered users are re-created at their next login. Not read_only: start-dev re-augments into /opt/keycloak/lib.
   keycloak:
-    image: ${TODO_KEYCLOAK_IMAGE:-quay.io/keycloak/keycloak:26.8.2}
+    # SCRUM-13-NFR-04: pinned by tag AND digest (digest reported by CI run 45665774532, job e2e).
+    image: ${TODO_KEYCLOAK_IMAGE:-quay.io/keycloak/keycloak:26.8.2@sha256:7e66a96e4739239070aeaf72e4c5decf0f7f682cfc725b9f7ea2b336eaba38b3}
     command: ["start-dev", "--import-realm"]
     environment:
       KC_BOOTSTRAP_ADMIN_USERNAME: ${TODO_KC_ADMIN_USER:-admin}               # dev only
