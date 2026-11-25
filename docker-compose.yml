@@ -1,11 +1,15 @@
 # SCRUM-2-NFR-03 + SCRUM-7 (AC-07..AC-12, design §6). Credentials are LOCAL-DEVELOPMENT DEFAULTS, not secrets.
-#   PostgreSQL only (local dev):  docker compose up -d
+#   PostgreSQL + Keycloak (local dev: ./mvnw spring-boot:run, Vite):  docker compose up -d
+#     SCRUM-13-AC-28: plain `up -d` now also starts Keycloak (http://localhost:8180) — a locally run backend validates
+#     tokens of its realm `todo` and the Vite dev server logs in there (ADR 0018).
 #   Whole stack:                  docker compose --profile app up --build -d --wait   → http://localhost:3000
+#     Sign in with "Corp SSO" → alice / alice-dev-only (README → Authentication, all test accounts).
 #   Published release (SCRUM-8-AC-15, docs/release/RELEASE.md), no build:
 #     TODO_BACKEND_IMAGE=ghcr.io/vinods21/todo-backend TODO_FRONTEND_IMAGE=ghcr.io/vinods21/todo-frontend \
 #     TODO_IMAGE_TAG=0.1.0 docker compose --profile app pull backend frontend
 #     … same env … docker compose --profile app up --no-build -d --wait
 #   Pin by digest (rollback, docs/release/ROLLBACK.md): TODO_BACKEND_TAG=0.1.0@sha256:<digest> (same for FRONTEND).
+#   SCRUM-13-AC-30: a published release also needs ./keycloak/realms/ next to this file (realm import).
 # Override any ${TODO_*} via environment or a git-ignored .env (see .env.example).
 services:
   postgres:
@@ -27,6 +31,44 @@ services:
       start_period: 10s
       start_interval: 1s
 
+  # SCRUM-13 (ADR 0018 §6, ADR 0019, design §4.2): LOCAL DEVELOPMENT / CI ONLY — dev mode, embedded dev-file database,
+  # committed dev-only secrets (realm JSON). A third-party dev/CI dependency like postgres: never built, scanned or
+  # published by this repository. Realms `todo` (application) and `mock-idp` (mock enterprise IdP) are imported from
+  # ./keycloak/realms on every NEW container (strategy IGNORE_EXISTING). Persistence (SCRUM-13-AC-29): the dev-file DB
+  # lives in the container's writable layer — it survives stop/start/restart, and is gone after `down` (and `down -v`);
+  # brokered users are re-created at their next login. Not read_only: start-dev re-augments into /opt/keycloak/lib.
+  keycloak:
+    image: ${TODO_KEYCLOAK_IMAGE:-quay.io/keycloak/keycloak:26.8.2}
+    command: ["start-dev", "--import-realm"]
+    environment:
+      KC_BOOTSTRAP_ADMIN_USERNAME: ${TODO_KC_ADMIN_USER:-admin}               # dev only
+      KC_BOOTSTRAP_ADMIN_PASSWORD: ${TODO_KC_ADMIN_PASSWORD:-admin-dev-only}  # dev only
+      # Fixed public URL → one issuer http://localhost:<port>/realms/todo for browser, containers, curl (ADR 0018 §1).
+      KC_HOSTNAME: http://localhost:${TODO_KEYCLOAK_PORT:-8180}
+      KC_HTTP_PORT: "8080"
+      KC_HEALTH_ENABLED: "true"                                   # /health/ready on management port 9000 (not published)
+      # Realm-import placeholders ${VAR:default} in keycloak/realms/*.json (ADR 0019 §3).
+      TODO_KC_PUBLIC_URL: http://localhost:${TODO_KEYCLOAK_PORT:-8180}
+      TODO_KC_INTERNAL_URL: http://localhost:8080                 # broker back channel: Keycloak calls itself
+      TODO_APP_URL: http://localhost:${TODO_FRONTEND_PORT:-3000}
+      TODO_DEV_URL: http://localhost:5173
+      TODO_KC_ACCESS_TOKEN_LIFESPAN: ${TODO_KC_ACCESS_TOKEN_LIFESPAN:-300}
+    ports:
+      - "${TODO_KEYCLOAK_PORT:-8180}:8080"
+    volumes:
+      - ./keycloak/realms:/opt/keycloak/data/import:ro
+    healthcheck:
+      # The image has no curl/wget: bash /dev/tcp against the management port (design §2.3 S-16).
+      test: ["CMD", "bash", "-c", "exec 3<>/dev/tcp/127.0.0.1/9000 && printf 'GET /health/ready HTTP/1.1\\r\\nHost: localhost\\r\\nConnection: close\\r\\n\\r\\n' >&3 && grep -q '\"status\": \"UP\"' <&3"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 120s
+      start_interval: 2s
+    cap_drop: [ALL]
+    security_opt:
+      - no-new-privileges:true
+
   backend:
     profiles: [app]
     build:
@@ -46,6 +88,10 @@ services:
       DB_PASSWORD: ${TODO_DB_PASSWORD:-todo}
       SERVER_PORT: "8080"
       APP_CORS_ALLOWED_ORIGINS: ${TODO_CORS_ALLOWED_ORIGINS:-http://localhost:5173}   # AC-12: dev mode
+      # SCRUM-13 (ADR 0018 §1): validate the PUBLIC issuer, fetch keys from the internal URL (lazily, no start-up dependency).
+      APP_AUTH_ISSUER_URI: http://localhost:${TODO_KEYCLOAK_PORT:-8180}/realms/todo
+      APP_AUTH_JWK_SET_URI: http://keycloak:8080/realms/todo/protocol/openid-connect/certs
+      APP_AUTH_CLOCK_SKEW: ${TODO_AUTH_CLOCK_SKEW:-30s}
     ports:
       - "${TODO_BACKEND_PORT:-8080}:8080"   # AC-12: curl/debug and Vite dev mode
     depends_on:
@@ -79,11 +125,17 @@ services:
     image: ${TODO_FRONTEND_IMAGE:-todo-frontend}:${TODO_FRONTEND_TAG:-${TODO_IMAGE_TAG:-local}}
     environment:
       BACKEND_URL: http://backend:8080
+      # SCRUM-13-AC-16 (ADR 0018 §3): served as /auth-config.json and added to the CSP connect-src (exact origin).
+      AUTH_URL: http://localhost:${TODO_KEYCLOAK_PORT:-8180}
+      AUTH_REALM: todo
+      AUTH_CLIENT_ID: todo-frontend
     ports:
       - "${TODO_FRONTEND_PORT:-3000}:8080"
     depends_on:
       backend:
         condition: service_healthy
+      keycloak:
+        condition: service_healthy        # SCRUM-13-AC-27: the login works as soon as `up --wait` returns
     healthcheck:
       test: ["CMD", "wget", "-q", "-O", "/dev/null", "http://127.0.0.1:8080/healthz"]
       interval: 10s
