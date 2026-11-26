@@ -5,6 +5,7 @@
   "sslRequired": "external",
   "registrationAllowed": false,
   "loginWithEmailAllowed": false,
+  "bruteForceProtected": true,
   "accessTokenLifespan": "${TODO_KC_ACCESS_TOKEN_LIFESPAN:300}",
   "ssoSessionIdleTimeout": 1800,
   "ssoSessionMaxLifespan": 36000,
@@ -27,11 +28,11 @@
       "serviceAccountsEnabled": false,
       "frontchannelLogout": false,
       "fullScopeAllowed": false,
-      "redirectUris": ["${TODO_APP_URL:http://localhost:3000}/*", "${TODO_DEV_URL:http://localhost:5173}/*"],
+      "redirectUris": ["${TODO_APP_URL:http://localhost:3000}/oidc/callback", "${TODO_DEV_URL:http://localhost:5173}/oidc/callback"],
       "webOrigins": ["${TODO_APP_URL:http://localhost:3000}", "${TODO_DEV_URL:http://localhost:5173}"],
       "attributes": {
         "pkce.code.challenge.method": "S256",
-        "post.logout.redirect.uris": "${TODO_APP_URL:http://localhost:3000}/*##${TODO_DEV_URL:http://localhost:5173}/*"
+        "post.logout.redirect.uris": "${TODO_APP_URL:http://localhost:3000}/signed-out##${TODO_DEV_URL:http://localhost:5173}/signed-out"
       },
       "protocolMappers": [
         {

@@ -257,7 +257,7 @@ Essentials (see ADR 0019 for the why):
       TODO_DEV_URL: http://localhost:5173
       TODO_KC_ACCESS_TOKEN_LIFESPAN: ${TODO_KC_ACCESS_TOKEN_LIFESPAN:-300}
     ports:
-      - "${TODO_KEYCLOAK_PORT:-8180}:8080"
+      - "127.0.0.1:${TODO_KEYCLOAK_PORT:-8180}:8080"   # loopback only (dev-only admin)
     volumes:
       - ./keycloak/realms:/opt/keycloak/data/import:ro
     healthcheck:
@@ -344,7 +344,7 @@ public class SecurityConfig {
         http
             .securityMatcher("/**")
             .authorizeHttpRequests(a -> a
-                .requestMatchers(HttpMethod.OPTIONS, "/api/**").permitAll()          // CORS preflight (AC-19)
+                .requestMatchers(CorsUtils::isPreFlightRequest).permitAll()          // CORS preflight only (AC-19)
                 .requestMatchers("/actuator/health", "/actuator/health/**", "/actuator/info", "/error").permitAll()
                 .requestMatchers(HttpMethod.GET, "/api/me").authenticated()           // AC-21
                 .requestMatchers("/api/**").hasRole("todo-user")                      // AC-19
@@ -847,6 +847,7 @@ an import placeholder (unresolved names stay verbatim, S-02).
   "sslRequired": "external",
   "registrationAllowed": false,
   "loginWithEmailAllowed": false,
+  "bruteForceProtected": true,
   "accessTokenLifespan": "${TODO_KC_ACCESS_TOKEN_LIFESPAN:300}",
   "ssoSessionIdleTimeout": 1800,
   "ssoSessionMaxLifespan": 36000,
@@ -869,11 +870,11 @@ an import placeholder (unresolved names stay verbatim, S-02).
       "serviceAccountsEnabled": false,
       "frontchannelLogout": false,
       "fullScopeAllowed": false,
-      "redirectUris": ["${TODO_APP_URL:http://localhost:3000}/*", "${TODO_DEV_URL:http://localhost:5173}/*"],
+      "redirectUris": ["${TODO_APP_URL:http://localhost:3000}/oidc/callback", "${TODO_DEV_URL:http://localhost:5173}/oidc/callback"],
       "webOrigins": ["${TODO_APP_URL:http://localhost:3000}", "${TODO_DEV_URL:http://localhost:5173}"],
       "attributes": {
         "pkce.code.challenge.method": "S256",
-        "post.logout.redirect.uris": "${TODO_APP_URL:http://localhost:3000}/*##${TODO_DEV_URL:http://localhost:5173}/*"
+        "post.logout.redirect.uris": "${TODO_APP_URL:http://localhost:3000}/signed-out##${TODO_DEV_URL:http://localhost:5173}/signed-out"
       },
       "protocolMappers": [
         {
@@ -984,6 +985,7 @@ env value and coerces the string (spike: `TODO_KC_ACCESS_TOKEN_LIFESPAN=240` →
   "enabled": true,
   "sslRequired": "external",
   "registrationAllowed": false,
+  "bruteForceProtected": true,
   "accessTokenLifespan": 300,
   "ssoSessionIdleTimeout": 1800,
   "groups": [ { "name": "todo-users" }, { "name": "todo-admins" } ],

@@ -247,6 +247,17 @@ class SecurityIntegrationTest {
     }
 
     @Test
+    @DisplayName("SCRUM-13-AC-19, SCRUM-13-AC-20: a plain OPTIONS (no preflight) without a token → 401 (no Allow-header enumeration)")
+    void plainOptionsNeedsAToken() {
+        for (String path : List.of("/api/tasks", "/api/tasks/1", "/api/nope")) {
+            ResponseEntity<String> response = anonymous.exchange(HttpMethod.OPTIONS, path, null, null, Map.of());
+
+            assertApiError(response, 401, "Authentication required", path);
+            assertThat(response.getHeaders().getFirst(HttpHeaders.ALLOW)).as(path).isNull();
+        }
+    }
+
+    @Test
     @DisplayName("SCRUM-13-AC-19, SCRUM-13-AC-20: a cross-origin 401 from the dev origin is readable by the SPA (CORS headers)")
     void crossOrigin401CarriesCorsHeaders() {
         ResponseEntity<String> response = anonymous.exchange(HttpMethod.GET, "/api/tasks", null, null,

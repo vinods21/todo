@@ -20,6 +20,8 @@ import org.springframework.security.oauth2.jwt.JwtTimestampValidator;
 import org.springframework.security.oauth2.server.resource.web.authentication.BearerTokenAuthenticationFilter;
 import org.springframework.security.web.authentication.AuthenticationEntryPointFailureHandler;
 import org.springframework.security.web.SecurityFilterChain;
+import org.springframework.security.web.util.matcher.RequestMatcher;
+import org.springframework.web.cors.CorsUtils;
 
 import java.util.List;
 
@@ -42,6 +44,9 @@ import java.util.List;
 public class SecurityConfig {
 
     static final String JWT_PROPERTIES = "spring.security.oauth2.resourceserver.jwt";
+
+    /** SCRUM-13-AC-19: a CORS preflight request (not just any OPTIONS request). */
+    static final RequestMatcher CORS_PREFLIGHT = CorsUtils::isPreFlightRequest;
 
     /** SCRUM-13-NFR-06: missing issuer, JWKS URL or audience fails the start instead of weakening validation. */
     public SecurityConfig(Environment environment) {
@@ -67,7 +72,9 @@ public class SecurityConfig {
             ApiErrorAccessDeniedHandler accessDeniedHandler) throws Exception {
         http
                 .authorizeHttpRequests(requests -> requests
-                        .requestMatchers(HttpMethod.OPTIONS, "/api/**").permitAll()
+                        // Only real CORS preflights (OPTIONS + Origin + Access-Control-Request-Method) are anonymous: a
+                        // plain OPTIONS would reach MVC and reveal existing endpoints via 200 + Allow vs 404 (AC-20).
+                        .requestMatchers(CORS_PREFLIGHT).permitAll()
                         .requestMatchers("/actuator/health", "/actuator/health/**", "/actuator/info", "/error")
                         .permitAll()
                         .requestMatchers(HttpMethod.GET, "/api/me").authenticated()

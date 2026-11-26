@@ -55,7 +55,8 @@ services:
       TODO_DEV_URL: http://localhost:5173
       TODO_KC_ACCESS_TOKEN_LIFESPAN: ${TODO_KC_ACCESS_TOKEN_LIFESPAN:-300}
     ports:
-      - "${TODO_KEYCLOAK_PORT:-8180}:8080"
+      # Loopback only: the admin console with the committed dev-only bootstrap admin must not be reachable from the LAN.
+      - "127.0.0.1:${TODO_KEYCLOAK_PORT:-8180}:8080"
     volumes:
       - ./keycloak/realms:/opt/keycloak/data/import:ro
     healthcheck:

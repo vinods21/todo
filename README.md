@@ -206,7 +206,9 @@ The token is valid for 5 minutes; fetch a new one afterwards. Responses: missing
 HTTPS everywhere (`KC_HOSTNAME=https://…`, `sslRequired: all`, secure cookies); Keycloak `start --optimized` from a
 built image with a production database, backups and HA; no bootstrap admin; secrets (broker client, any confidential
 client) from a secret store; the real corporate IdP's endpoints and client instead of `mock-idp`; no service-account
-test clients; token lifetimes per policy. The application side needs only configuration: `APP_AUTH_ISSUER_URI`,
+test clients (`todo-e2e`, `todo-e2e-short` mint `todo-user` tokens with committed secrets); token lifetimes per policy;
+review `trustEmail` / the first-broker-login flow (account linking by e-mail) for the real IdP. Locally, Keycloak's
+port is published on `127.0.0.1` only, and brute-force detection is on in both realms. The application side needs only configuration: `APP_AUTH_ISSUER_URI`,
 `APP_AUTH_JWK_SET_URI`, `APP_AUTH_AUDIENCE` (backend) and `AUTH_URL`/`AUTH_REALM`/`AUTH_CLIENT_ID` (frontend).
 
 ## Run with Docker Compose (SCRUM-7)
