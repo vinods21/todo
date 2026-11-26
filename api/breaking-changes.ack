@@ -2,3 +2,9 @@
 # One line per change: <JIRA-KEY> <METHOD> <path> <oasdiff text, verbatim> -- <why this break is acceptable>
 # The gate prints the exact line to add. On feature branches / PRs only entries of the branch's Jira key count.
 # Remove entries once the change is on main (they are then reported as unused).
+SCRUM-13 GET /api/tasks the endpoint no longer allows anonymous access and now only accepts `bearerAuth` -- SCRUM-13 (ADR 0018): every Task operation requires a Keycloak access token; the only consumers (SPA, repository scripts and tests) authenticate in the same change
+SCRUM-13 POST /api/tasks the endpoint no longer allows anonymous access and now only accepts `bearerAuth` -- SCRUM-13 (ADR 0018): every Task operation requires a Keycloak access token; the only consumers (SPA, repository scripts and tests) authenticate in the same change
+SCRUM-13 DELETE /api/tasks/{id} the endpoint no longer allows anonymous access and now only accepts `bearerAuth` -- SCRUM-13 (ADR 0018): every Task operation requires a Keycloak access token; the only consumers (SPA, repository scripts and tests) authenticate in the same change
+SCRUM-13 GET /api/tasks/{id} the endpoint no longer allows anonymous access and now only accepts `bearerAuth` -- SCRUM-13 (ADR 0018): every Task operation requires a Keycloak access token; the only consumers (SPA, repository scripts and tests) authenticate in the same change
+SCRUM-13 PUT /api/tasks/{id} the endpoint no longer allows anonymous access and now only accepts `bearerAuth` -- SCRUM-13 (ADR 0018): every Task operation requires a Keycloak access token; the only consumers (SPA, repository scripts and tests) authenticate in the same change
+SCRUM-13 PATCH /api/tasks/{id}/status the endpoint no longer allows anonymous access and now only accepts `bearerAuth` -- SCRUM-13 (ADR 0018): every Task operation requires a Keycloak access token; the only consumers (SPA, repository scripts and tests) authenticate in the same change

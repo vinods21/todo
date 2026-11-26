@@ -92,6 +92,9 @@ jobs:
           ./mvnw -B -ntp dependency:tree -Dscope=runtime "-Drevision=${BUILD_VERSION}" > target/dependency-tree-runtime.txt
           echo "OpenAPI / Jackson artefacts on the runtime classpath:"
           grep -iE 'swagger|springdoc|jackson' target/dependency-tree-runtime.txt || true
+          # SCRUM-13-NFR-03: the resource-server stack is the only new runtime addition (Spring Security + Nimbus JOSE).
+          echo "Security artefacts on the runtime classpath (SCRUM-13-NFR-03):"
+          grep -iE 'security|nimbus|jcip|oauth2' target/dependency-tree-runtime.txt || true
 
       - name: Coverage summary
         if: always()
@@ -276,6 +279,10 @@ jobs:
       TODO_IMAGE_TAG: ${{ needs.identity.outputs.jira_key }}-${{ github.sha }}
       COMPOSE_PROFILES: app
       COMPOSE_PROJECT_NAME: todo-e2e
+      # SCRUM-13 (design §11.2): Keycloak starts with the stack (pinned image, realms from keycloak/realms); a 5 s backend
+      # clock skew keeps the token-expiry tests short; Playwright waits accordingly.
+      TODO_AUTH_CLOCK_SKEW: 5s
+      E2E_AUTH_CLOCK_SKEW_SECONDS: "5"
     steps:
       - uses: actions/checkout@v4
 
@@ -339,6 +346,15 @@ jobs:
           cache-from: type=gha,scope=todo-frontend
           cache-to: type=gha,scope=todo-frontend,mode=max
 
+      # SCRUM-13-AC-01, NFR-04: the Keycloak image (third-party dev/CI service, never built here) and its digest.
+      - name: Keycloak image and digest (SCRUM-13-AC-01, NFR-04)
+        run: |
+          image=$(docker compose config --format json | jq -r '.services.keycloak.image')
+          docker compose pull --quiet keycloak
+          echo "keycloak image: ${image}"
+          echo "repo digests:   $(docker image inspect -f '{{ join .RepoDigests " " }}' "$image")"
+          echo "- Keycloak image \`${image}\` → \`$(docker image inspect -f '{{ join .RepoDigests " " }}' "$image")\`" >> "$GITHUB_STEP_SUMMARY"
+
       - name: Start stack and wait for health (SCRUM-7-AC-07, AC-09)
         id: stack
         run: docker compose up -d --no-build --wait --wait-timeout 240
@@ -354,7 +370,7 @@ jobs:
         if: ${{ !cancelled() && steps.stack.outcome == 'success' }}
         uses: ./.github/actions/e2e-playwright
 
-      - name: E2E against Compose (SCRUM-7-AC-18, AC-19)
+      - name: E2E against Compose (SCRUM-7-AC-18, AC-19; SCRUM-13-AC-26, AC-33)
         if: ${{ !cancelled() && steps.stack.outcome == 'success' }}
         working-directory: e2e
         env:
@@ -376,7 +392,7 @@ jobs:
           E2E_MODE: dev
         run: npx playwright test
 
-      - name: Lifecycle and persistence (SCRUM-7-AC-03, AC-10)
+      - name: Lifecycle and persistence (SCRUM-7-AC-03, AC-10; authenticated, SCRUM-13-AC-33)
         if: ${{ !cancelled() && steps.stack.outcome == 'success' }}
         run: .github/scripts/verify-lifecycle.sh
 

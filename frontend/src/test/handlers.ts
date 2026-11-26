@@ -1,8 +1,10 @@
-import { http, HttpResponse } from 'msw'
+import { http, HttpResponse, type HttpResponseResolver } from 'msw'
 import { isTaskStatus, type Page, type Task, type TaskCreateRequest, type TaskStatusUpdateRequest } from '../api/types'
-import { API, errorBody } from './fixtures'
+import { API, errorBody, makeCurrentUser, TEST_ACCESS_TOKEN } from './fixtures'
 
 // Default MSW handlers: an in-memory task store with SCRUM-2 semantics (newest first, page/size, 404 and 400 bodies).
+// SCRUM-13 (ADR 0007 amended): like the backend, every handler requires `Authorization: Bearer test-access-token`
+// (the fake token source's token) and otherwise answers 401 with the ApiError body and a WWW-Authenticate header.
 
 interface Store {
   tasks: Task[]
@@ -32,6 +34,7 @@ export function resetStore(): void {
   store.clock = Date.parse('2026-11-01T00:00:00Z')
   requestLog.length = 0
   bodyLog.length = 0
+  authorizationLog.length = 0
 }
 
 /** Adds tasks to the store; later entries are newer. Returns the stored tasks. */
@@ -81,8 +84,41 @@ function idOf(params: Record<string, string | readonly string[] | undefined>): n
   return Number(params.id)
 }
 
+/** Every Authorization header the default handlers saw, in order (null = none). */
+export const authorizationLog: (string | null)[] = []
+
+function unauthorized(request: Request): Response {
+  const path = new URL(request.url).pathname
+  return HttpResponse.json(errorBody(401, 'Authentication required', [], path), {
+    status: 401,
+    headers: { 'WWW-Authenticate': 'Bearer' },
+  })
+}
+
+/** Wraps a resolver: 401 unless the request carries the test access token (backend fidelity). */
+function authenticated(resolver: HttpResponseResolver): HttpResponseResolver {
+  return (info) => {
+    const authorization = info.request.headers.get('authorization')
+    authorizationLog.push(authorization)
+    if (authorization !== `Bearer ${TEST_ACCESS_TOKEN}`) {
+      log(info.request)
+      return unauthorized(info.request)
+    }
+    return resolver(info)
+  }
+}
+
 export const handlers = [
-  http.get(`${API}/tasks`, ({ request }) => {
+  // SCRUM-13-AC-21: the signed-in user (alice with the application role).
+  http.get(
+    `${API}/me`,
+    authenticated(({ request }) => {
+      log(request)
+      return HttpResponse.json(makeCurrentUser())
+    }),
+  ),
+
+  http.get(`${API}/tasks`, authenticated(({ request }) => {
     log(request)
     const url = new URL(request.url)
     const page = Number(url.searchParams.get('page') ?? '0')
@@ -101,17 +137,17 @@ export const handlers = [
       totalPages: Math.ceil(sorted.length / size),
     }
     return HttpResponse.json(body)
-  }),
+  })),
 
-  http.get(`${API}/tasks/:id`, ({ request, params }) => {
+  http.get(`${API}/tasks/:id`, authenticated(({ request, params }) => {
     log(request)
     const task = storedTask(idOf(params))
     return task
       ? HttpResponse.json(task)
       : HttpResponse.json(errorBody(404, `Task with id ${params.id} not found`), { status: 404 })
-  }),
+  })),
 
-  http.post(`${API}/tasks`, async ({ request }) => {
+  http.post(`${API}/tasks`, authenticated(async ({ request }) => {
     log(request)
     const body = (await request.json()) as TaskCreateRequest
     bodyLog.push(body)
@@ -120,9 +156,9 @@ export const handlers = [
     const [task] = seedTasks([{ ...body, title: body.title.trim(), status: body.status ?? 'TODO' }])
     // SCRUM-12-AC-07: Location is a required header of 201 in api/openapi.yaml (the backend always sends it)
     return HttpResponse.json(task, { status: 201, headers: { Location: `${API}/tasks/${task?.id}` } })
-  }),
+  })),
 
-  http.put(`${API}/tasks/:id`, async ({ request, params }) => {
+  http.put(`${API}/tasks/:id`, authenticated(async ({ request, params }) => {
     log(request)
     const id = idOf(params)
     const existing = storedTask(id)
@@ -133,10 +169,10 @@ export const handlers = [
     if (invalid) return invalid
     Object.assign(existing, { ...body, title: body.title.trim() })
     return HttpResponse.json(existing)
-  }),
+  })),
 
   // SCRUM-6-AC-01..AC-03 semantics: only status changes; 404 unknown id; 400 with a status field error.
-  http.patch(`${API}/tasks/:id/status`, async ({ request, params }) => {
+  http.patch(`${API}/tasks/:id/status`, authenticated(async ({ request, params }) => {
     log(request)
     const id = idOf(params)
     const path = `/api/tasks/${id}/status`
@@ -152,5 +188,5 @@ export const handlers = [
     }
     existing.status = body.status
     return HttpResponse.json(existing)
-  }),
+  })),
 ]

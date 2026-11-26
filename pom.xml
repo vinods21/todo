@@ -90,7 +90,21 @@
             <artifactId>swagger-annotations-jakarta</artifactId>
         </dependency>
 
+        <!-- SCRUM-13 (ADR 0018): JWT resource server — Spring Security 7.1.2, Nimbus JOSE+JWT 10.9.1 (runtime, gated
+             scan; NFR-03). Boot 4 name; spring-boot-starter-oauth2-resource-server is deprecated in 4.1.2. -->
+        <dependency>
+            <groupId>org.springframework.boot</groupId>
+            <artifactId>spring-boot-starter-security-oauth2-resource-server</artifactId>
+        </dependency>
+
         <!-- Tests (SCRUM-2-AC-16, SCRUM-2-NFR-03) -->
+        <!-- SCRUM-13: spring-security-test (jwt(), @WithMockUser) + Security MockMvc auto-configuration for @WebMvcTest;
+             tokens are minted with Nimbus (on the classpath via the starter above) — no Keycloak in backend tests -->
+        <dependency>
+            <groupId>org.springframework.boot</groupId>
+            <artifactId>spring-boot-starter-security-oauth2-resource-server-test</artifactId>
+            <scope>test</scope>
+        </dependency>
         <dependency>
             <groupId>org.springframework.boot</groupId>
             <artifactId>spring-boot-starter-test</artifactId>

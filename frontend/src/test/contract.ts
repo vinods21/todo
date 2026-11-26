@@ -6,6 +6,7 @@ import specText from '../../../api/openapi.yaml?raw'
 import { Ajv2020, type ErrorObject, type ValidateFunction } from 'ajv/dist/2020'
 import addFormats from 'ajv-formats'
 import { parse } from 'yaml'
+import { TEST_ACCESS_TOKEN } from './fixtures'
 
 interface HeaderObject {
   required?: boolean
@@ -176,11 +177,14 @@ export async function fetchViolations(
   method: string,
   url: string,
   body?: unknown,
+  token: string | null = TEST_ACCESS_TOKEN, // null = anonymous
 ): Promise<{ status: number; violations: string[] }> {
-  const init: RequestInit = { method }
+  // SCRUM-13: authenticated like the app (the default handlers answer 401 without the test token).
+  const headers: Record<string, string> = token === null ? {} : { Authorization: `Bearer ${token}` }
+  const init: RequestInit = { method, headers }
   if (body !== undefined) {
     init.body = JSON.stringify(body)
-    init.headers = { 'Content-Type': 'application/json' }
+    headers['Content-Type'] = 'application/json'
   }
   const response = await fetch(url, init)
   const text = await response.text()

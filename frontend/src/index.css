@@ -183,3 +183,22 @@ button:disabled {
   margin-left: 0.5rem;
   color: #59636e;
 }
+
+/* SCRUM-13: header actions (New task + user menu) and the auth pages (signed out, no access, sign-in errors). */
+.app-header-actions {
+  display: flex;
+  align-items: center;
+  gap: 1rem;
+}
+
+.user-menu {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+.auth-page {
+  max-width: 40rem;
+  margin: 3rem auto;
+  padding: 0 1rem;
+}

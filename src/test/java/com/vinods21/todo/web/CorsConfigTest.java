@@ -1,12 +1,16 @@
 package com.vinods21.todo.web;
 
+import com.vinods21.todo.config.SecurityConfig;
 import com.vinods21.todo.service.TaskService;
+import com.vinods21.todo.web.security.ApiErrorAccessDeniedHandler;
+import com.vinods21.todo.web.security.ApiErrorAuthenticationEntryPoint;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Nested;
 import org.junit.jupiter.api.Tag;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.webmvc.test.autoconfigure.WebMvcTest;
+import org.springframework.context.annotation.Import;
 import org.springframework.http.HttpHeaders;
 import org.springframework.test.context.TestPropertySource;
 import org.springframework.test.context.bean.override.mockito.MockitoBean;
@@ -21,6 +25,8 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 @Tag("SCRUM-2")
 @DisplayName("SCRUM-2 CORS configuration")
 @WebMvcTest(TaskController.class)
+// SCRUM-13-AC-19: the real security rules — CORS preflights pass without a token
+@Import({SecurityConfig.class, ApiErrorAuthenticationEntryPoint.class, ApiErrorAccessDeniedHandler.class})
 class CorsConfigTest {
 
     @Autowired

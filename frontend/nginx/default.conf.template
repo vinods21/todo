@@ -2,6 +2,8 @@
 # Rendered by the nginx entrypoint (envsubst, NGINX_ENVSUBST_FILTER) into /etc/nginx/conf.d/default.conf.
 # ${BACKEND_URL}: scheme://host:port of the API, no path (default http://backend:8080).
 # ${NGINX_LOCAL_RESOLVERS}: filled from /etc/resolv.conf by 15-local-resolvers.envsh (Docker DNS).
+# SCRUM-13 (ADR 0018 §3): ${AUTH_URL} (Keycloak base URL, no trailing slash), ${AUTH_REALM}, ${AUTH_CLIENT_ID} — validated
+# by /docker-entrypoint.d/16-todo-auth-config.sh before this template is rendered (no header/JSON injection).
 
 server_tokens off;
 
@@ -13,6 +15,11 @@ server {
 
     resolver ${NGINX_LOCAL_RESOLVERS} valid=10s ipv6=off;
     set $backend "${BACKEND_URL}";  # variable → re-resolved, nginx starts even if the backend is not up yet
+
+    # SCRUM-13-AC-16: runtime auth settings; $auth_url is also the only CSP addition (security-headers.conf).
+    set $auth_url "${AUTH_URL}";
+    set $auth_realm "${AUTH_REALM}";
+    set $auth_client_id "${AUTH_CLIENT_ID}";
 
     gzip on;
     gzip_vary on;
@@ -26,6 +33,15 @@ server {
         access_log off;
         default_type text/plain;
         return 200 "ok\n";
+    }
+
+    # SCRUM-13-AC-16: the SPA reads its Keycloak settings at start-up (built with VITE_AUTH_CONFIG_URL=/auth-config.json),
+    # so one image runs on any host/port. Exact match wins over the file-extension regex location below.
+    location = /auth-config.json {
+        default_type application/json;
+        include /etc/nginx/snippets/security-headers.conf;
+        add_header Cache-Control "no-cache" always;
+        return 200 '{"url":"$auth_url","realm":"$auth_realm","clientId":"$auth_client_id"}\n';
     }
 
     # AC-06: API → backend. No URI in proxy_pass: the original path + query string are forwarded unchanged.

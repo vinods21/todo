@@ -41,7 +41,175 @@ To-Do application (epic SCRUM-5):
   Design: [`docs/architecture/SCRUM-12-design.md`](docs/architecture/SCRUM-12-design.md) · Matrix:
   [`docs/traceability/SCRUM-12.md`](docs/traceability/SCRUM-12.md)
 
+- **SCRUM-13 — authentication:** Keycloak (realm `todo`) with a mock enterprise OIDC IdP (realm `mock-idp`, "Corp
+  SSO") brokered into it; the SPA logs in with Authorization Code + PKCE and keeps tokens in memory; the backend is a
+  JWT resource server (401/403, `GET /api/me`) — see [Authentication](#authentication-scrum-13) (**test credentials,
+  local development only**). ADRs: [0018](docs/adr/0018-authentication-keycloak-oidc.md),
+  [0019](docs/adr/0019-mock-enterprise-idp-brokering.md) · Requirements:
+  [`docs/requirements/SCRUM-13.md`](docs/requirements/SCRUM-13.md) · Design:
+  [`docs/architecture/SCRUM-13-design.md`](docs/architecture/SCRUM-13-design.md) · Matrix:
+  [`docs/traceability/SCRUM-13.md`](docs/traceability/SCRUM-13.md)
+
 Architecture decisions for all parts are in [`docs/adr/`](docs/adr).
+
+## Authentication (SCRUM-13)
+
+> **LOCAL DEVELOPMENT ONLY — NOT FOR PRODUCTION.** Keycloak runs in development mode with an embedded,
+> throw-away database, over plain HTTP on `localhost`, with a bootstrap admin and **committed** secrets and passwords
+> (all marked `dev-only`). None of them is baked into an image or used by a release. See
+> [Production delta](#production-delta-not-in-this-repository) below.
+
+The app sits behind a real login ([ADR 0018](docs/adr/0018-authentication-keycloak-oidc.md),
+[ADR 0019](docs/adr/0019-mock-enterprise-idp-brokering.md), [design](docs/architecture/SCRUM-13-design.md)):
+
+```
+Browser (SPA, oidc-client-ts, tokens in memory)
+  │ 1. no session → redirect (Authorization Code + PKCE S256)
+  ▼
+Keycloak http://localhost:8180  realm "todo"  (application realm: client todo-frontend, roles todo-user / todo-admin)
+  │ 2. "Corp SSO" button → OIDC identity brokering
+  ▼
+Keycloak http://localhost:8180  realm "mock-idp"  (mock enterprise IdP: users alice / bob / carol, groups)
+  │ 3. user signs in at the IdP → ID token with groups → realm "todo" creates the user, maps groups → roles
+  ▼
+SPA gets an access token (aud todo-api, 5 min, refreshed silently) → GET /api/** with Authorization: Bearer …
+  ▼
+Backend (Spring Security resource server): RS256 signature (JWKS of realm "todo"), iss, aud, exp/nbf (30 s skew),
+role todo-user for /api/tasks/**, authentication only for /api/me → 401 / 403 with the ApiError body otherwise
+```
+
+One Keycloak hosts both realms; both are configuration as code in [`keycloak/realms/`](keycloak/realms) and imported
+automatically by every **new** Keycloak container. The issuer is always `http://localhost:8180/realms/todo`
+(`KC_HOSTNAME` is fixed), whether the token was requested by the browser, the backend container or `curl`.
+
+### Start, stop, reset
+
+```bash
+docker compose up -d                                  # PostgreSQL + Keycloak (for ./mvnw spring-boot:run and npm run dev)
+docker compose --profile app up --build -d --wait     # + backend + frontend → http://localhost:3000
+docker compose --profile app down                     # stop; PostgreSQL data kept, Keycloak state (users, sessions) gone
+docker compose --profile app down -v                  # … and delete the PostgreSQL volume
+docker compose rm -sf keycloak && docker compose up -d keycloak   # reset Keycloak only (re-import the realms)
+```
+
+Since SCRUM-13 a plain `docker compose up -d` starts **PostgreSQL and Keycloak** (before: PostgreSQL only): a locally
+run backend validates Keycloak tokens and the Vite dev server logs in there. Keycloak becomes healthy after
+~20–40 s (`docker compose ps`); `--wait` waits for it. **Persistence:** Keycloak's state lives in its container — it
+survives `stop`/`start`/`restart`, is gone after `down`, and the realms come back from the JSON files on the next
+`up` (users are re-created at their next login).
+
+### URLs and ports
+
+| URL | What |
+|---|---|
+| <http://localhost:3000> | the app (redirects to the login) |
+| <http://localhost:8180/realms/todo/account> | Keycloak, realm `todo` (application realm; its login page shows **Corp SSO**) |
+| <http://localhost:8180/realms/mock-idp/account> | Keycloak, realm `mock-idp` (the mock enterprise IdP) |
+| <http://localhost:8180/admin> | Keycloak admin console (both realms) |
+| <http://localhost:8180/realms/todo/.well-known/openid-configuration> | OIDC discovery of the application realm |
+| <http://localhost:3000/auth-config.json> | Keycloak settings the SPA reads at start-up (from the frontend container env) |
+| <http://localhost:8080/api/me> | the signed-in user as the backend sees it (needs a token) |
+
+Port `8180` is `TODO_KEYCLOAK_PORT`; it moves the published port, `KC_HOSTNAME`, the realm URLs, the backend's
+issuer and the frontend's `AUTH_URL` together. Keycloak's management port 9000 (health) is not published.
+
+### Test credentials (LOCAL DEVELOPMENT ONLY)
+
+| Account | Where | Username / client ID | Password / secret | Result in the app |
+|---|---|---|---|---|
+| Alice | mock IdP user (log in via **Corp SSO**) | `alice` (alice@corp.example, group `todo-users`) | `alice-dev-only` | role `todo-user` — full access |
+| Bob | mock IdP user (via **Corp SSO**) | `bob` (bob@corp.example, groups `todo-users`, `todo-admins`) | `bob-dev-only` | roles `todo-user`, `todo-admin` (admin grants nothing extra yet) |
+| Carol | mock IdP user (via **Corp SSO**) | `carol` (carol@corp.example, no group) | `carol-dev-only` | no role — "You do not have access to this application" |
+| Keycloak admin | <http://localhost:8180/admin> (master realm) | `admin` (`TODO_KC_ADMIN_USER`) | `admin-dev-only` (`TODO_KC_ADMIN_PASSWORD`) | administers both realms |
+| Scripts / e2e | client of realm `todo` (client credentials) | `todo-e2e` | `dev-only-todo-e2e-secret` | service account with `todo-user` |
+| Expiry tests | client of realm `todo` (client credentials) | `todo-e2e-short` | `dev-only-todo-e2e-short-secret` | `todo-user`, 5-second access tokens |
+| Broker | client of realm `mock-idp`, used by realm `todo`'s identity provider `corp-sso` | `todo-broker` | `dev-only-todo-broker-secret` | — (not for humans) |
+| SPA | public client of realm `todo` | `todo-frontend` | — (public, PKCE) | — |
+
+Users exist only in the mock IdP; the application realm creates its user automatically at the first login ("first
+broker login", no extra page) and re-applies the group → role mapping at **every** login. **Log out** ends the
+session in both realms, so the next login asks for the IdP password again.
+
+### Token lifetimes (realm `todo`)
+
+| Setting | Value |
+|---|---|
+| Access token | **300 s** (`TODO_KC_ACCESS_TOKEN_LIFESPAN`, applied when a new container imports the realm); the SPA renews it 60 s before expiry with the refresh token |
+| SSO session idle / max | 1800 s / 36000 s (a reload within that time needs no password) |
+| Refresh tokens | rotate on every use (`revokeRefreshToken`, reuse 0) |
+| `todo-e2e-short` access token | 5 s |
+| Backend clock skew for `exp`/`nbf` | 30 s (`TODO_AUTH_CLOCK_SKEW` / `APP_AUTH_CLOCK_SKEW`, max 60 s; CI uses 5 s) |
+
+### Call the API with curl
+
+```bash
+TOKEN=$(curl -s -d grant_type=client_credentials -d client_id=todo-e2e -d client_secret=dev-only-todo-e2e-secret \
+  http://localhost:8180/realms/todo/protocol/openid-connect/token | jq -r .access_token)
+curl -s -H "Authorization: Bearer $TOKEN" http://localhost:8080/api/me
+curl -s -H "Authorization: Bearer $TOKEN" 'http://localhost:8080/api/tasks?page=0&size=20'
+curl -i http://localhost:8080/api/tasks          # no token → 401, ApiError body, WWW-Authenticate: Bearer …
+```
+
+The token is valid for 5 minutes; fetch a new one afterwards. Responses: missing/invalid/expired token → **401**
+(`WWW-Authenticate: Bearer`, plus `error="invalid_token"` for a rejected token); valid token without `todo-user` →
+**403** (`error="insufficient_scope"`); both with the standard `ApiError` body. `/actuator/health` and
+`/actuator/info` stay public; anonymous requests to unknown paths also get 401 (no endpoint enumeration).
+`GET /api/me` returns `{subject, username, email, name, roles}` and needs a token but not the role.
+
+### Development workflows
+
+- **Backend with `./mvnw spring-boot:run`:** `docker compose up -d` (PostgreSQL + Keycloak), then
+  `./mvnw spring-boot:run`. The defaults (`APP_AUTH_ISSUER_URI=http://localhost:8180/realms/todo`,
+  `APP_AUTH_JWK_SET_URI=http://localhost:8180/realms/todo/protocol/openid-connect/certs`, `APP_AUTH_AUDIENCE=todo-api`)
+  match the Compose Keycloak. The backend starts even if Keycloak is not up yet (keys are fetched on the first
+  request; until then requests are rejected with 401).
+- **Vite dev server:** `cd frontend && npm run dev` → <http://localhost:5173>. Login uses `VITE_AUTH_URL`
+  (default `http://localhost:8180`), `VITE_AUTH_REALM` (`todo`) and `VITE_AUTH_CLIENT_ID` (`todo-frontend`); the
+  realm allows `http://localhost:5173` as redirect URI and web origin, the backend allows it via CORS.
+- **Container image:** the frontend image reads its settings from `/auth-config.json`, rendered by nginx from the
+  env vars `AUTH_URL`, `AUTH_REALM`, `AUTH_CLIENT_ID` (validated at start; Compose sets them). The CSP gains exactly
+  one source, `connect-src 'self' <AUTH_URL>/` (token endpoint); login and logout are top-level navigations, so there
+  is no `frame-src`.
+
+### Change the realms
+
+1. Edit [`keycloak/realms/todo-realm.json`](keycloak/realms/todo-realm.json) or
+   [`mock-idp-realm.json`](keycloak/realms/mock-idp-realm.json) — or change a realm in the admin console and export it
+   (`Realm settings → Action → Partial export`), then copy only the changed keys into the JSON (keep the
+   `${TODO_…:default}` placeholders; `${CLAIM.preferred_username}` is a mapper template, not a placeholder).
+2. Re-import: `docker compose rm -sf keycloak && docker compose up -d keycloak` (an existing realm is never
+   overwritten — strategy `IGNORE_EXISTING` — so the container must be new).
+
+### Troubleshooting
+
+- *401 with `error="invalid_token"` and "issuer" in `WWW-Authenticate`:* the token's `iss` differs from the backend's
+  `APP_AUTH_ISSUER_URI`. Use `localhost` (not `127.0.0.1`) and the same `TODO_KEYCLOAK_PORT` for Keycloak, backend and
+  frontend; tokens fetched from `http://keycloak:8080` inside containers still say `http://localhost:8180`.
+- *"Invalid parameter: redirect_uri" on the Keycloak page:* the app runs on an origin the realm does not know (only
+  `http://localhost:3000` and `http://localhost:5173`, or `TODO_FRONTEND_PORT`). Open the app via `localhost`; after
+  changing ports, reset Keycloak (`docker compose rm -sf keycloak && docker compose up -d keycloak`).
+- *Expired tokens right after login / "Jwt expired" or "not before":* the clocks of the host and the containers
+  differ by more than the 30 s skew — sync the system clock (WSL/VM sleep is a common cause).
+- *Port 8180 already in use:* set `TODO_KEYCLOAK_PORT=8280` (everything follows) and reset Keycloak.
+- *Old users, roles or sessions after a realm change:* Keycloak keeps its state until the container is removed —
+  `docker compose rm -sf keycloak && docker compose up -d keycloak`.
+- *Login loop or "Sign-in failed":* clear the site data of `localhost` (Keycloak's cookies are on `localhost`, the
+  SPA keeps tokens only in memory) and reload.
+- *CSP errors in the browser console (`connect-src`):* `AUTH_URL` of the frontend container does not match the
+  Keycloak URL the browser uses.
+- *Corp SSO login hangs or fails with "Unexpected error when authenticating with identity provider" behind a
+  corporate proxy:* Keycloak's broker calls itself (`http://localhost:8080` inside the container); if the Docker
+  daemon injects `HTTP_PROXY` into containers, add `localhost,127.0.0.1,keycloak` to `NO_PROXY`.
+
+### Production delta (not in this repository)
+
+HTTPS everywhere (`KC_HOSTNAME=https://…`, `sslRequired: all`, secure cookies); Keycloak `start --optimized` from a
+built image with a production database, backups and HA; no bootstrap admin; secrets (broker client, any confidential
+client) from a secret store; the real corporate IdP's endpoints and client instead of `mock-idp`; no service-account
+test clients (`todo-e2e`, `todo-e2e-short` mint `todo-user` tokens with committed secrets); token lifetimes per policy;
+review `trustEmail` / the first-broker-login flow (account linking by e-mail) for the real IdP. Locally, Keycloak's
+port is published on `127.0.0.1` only, and brute-force detection is on in both realms. The application side needs only configuration: `APP_AUTH_ISSUER_URI`,
+`APP_AUTH_JWK_SET_URI`, `APP_AUTH_AUDIENCE` (backend) and `AUTH_URL`/`AUTH_REALM`/`AUTH_CLIENT_ID` (frontend).
 
 ## Run with Docker Compose (SCRUM-7)
 
@@ -59,14 +227,16 @@ docker compose --profile app up --build -d --wait
 ```
 
 `--wait` returns once every service is healthy (PostgreSQL → backend → frontend start in that order, each gated on
-the previous one's healthcheck) and fails if one does not become healthy. The first build downloads the Maven and npm
+the previous one's healthcheck; the frontend also waits for Keycloak — SCRUM-13) and fails if one does not become
+healthy. The first build downloads the Maven and npm
 dependencies and takes a few minutes; later builds reuse the cached layers.
 
 | URL | What |
 |---|---|
-| <http://localhost:3000> | the app (nginx serves the SPA and proxies `/api/**` and `/actuator/health` to the backend — same origin, no CORS) |
+| <http://localhost:3000> | the app (nginx serves the SPA and proxies `/api/**` and `/actuator/health` to the backend — same origin, no CORS); sign in with **Corp SSO** → `alice` / `alice-dev-only` ([Authentication](#authentication-scrum-13)) |
+| <http://localhost:8180> | Keycloak (realms `todo` and `mock-idp`, admin console `/admin`) — SCRUM-13 |
 | <http://localhost:3000/actuator/health> | backend health through the proxy |
-| <http://localhost:8080/api/tasks> | the API directly on the published backend port (curl, debugging, Vite dev mode) |
+| <http://localhost:8080/api/tasks> | the API directly on the published backend port (curl with a bearer token, debugging, Vite dev mode) |
 | <http://localhost:8080/actuator/info> | build identity of the backend (not proxied by the frontend) |
 
 **Stop / reset:**
@@ -96,6 +266,11 @@ secrets** — do not reuse them anywhere else.
 | `TODO_VERSION` | `0.0.0-SNAPSHOT` | version stamped into locally built images (releases come from Git tags, SCRUM-8) |
 | `JIRA_KEY`, `GIT_COMMIT`, `GIT_BRANCH` | `UNKNOWN` | build identity baked into the images (labels, jar, `/actuator/info`, UI footer) |
 | `COMPOSE_PROFILES` | — | `app` makes a plain `docker compose up -d` start the whole stack |
+| `TODO_KEYCLOAK_PORT` | `8180` | SCRUM-13: host port of Keycloak; also the issuer host the backend validates and the frontend's `AUTH_URL` |
+| `TODO_KC_ADMIN_USER`, `TODO_KC_ADMIN_PASSWORD` | `admin`, `admin-dev-only` | SCRUM-13: Keycloak bootstrap admin (dev only) |
+| `TODO_KC_ACCESS_TOKEN_LIFESPAN` | `300` | SCRUM-13: access-token lifetime (s) of realm `todo`, applied at realm import |
+| `TODO_AUTH_CLOCK_SKEW` | `30s` | SCRUM-13: backend `APP_AUTH_CLOCK_SKEW` for `exp`/`nbf` (max 60 s) |
+| `TODO_KEYCLOAK_IMAGE` | pinned `quay.io/keycloak/keycloak:26.8.2@sha256:…` | SCRUM-13: override only to try another Keycloak version |
 
 **Rebuild after code changes:** run the start command again (`docker compose --profile app up --build -d --wait`),
 or rebuild one image with `docker compose build backend` / `docker compose build frontend`.
@@ -152,7 +327,8 @@ are never edited for a release. Every other build gets a **build version** `X.Y.
 latest release, `0.1.0-<sha7>` before the first; `g<sha7>` if the SHA is all digits with a leading zero). Image tags
 `X.Y.Z` and `X.Y.Z-<sha7>` are immutable; `X.Y` and `latest` move. Local builds say `0.0.0-SNAPSHOT`.
 
-**Run a released version with Compose** (no build, no source needed beyond `docker-compose.yml`):
+**Run a released version with Compose** (no build, no source needed beyond `docker-compose.yml` and — since
+SCRUM-13 — the [`keycloak/realms/`](keycloak/realms) directory next to it, which Keycloak imports):
 
 ```bash
 export TODO_BACKEND_IMAGE=ghcr.io/vinods21/todo-backend TODO_FRONTEND_IMAGE=ghcr.io/vinods21/todo-frontend
@@ -183,8 +359,8 @@ node --test ".github/scripts/release/test/*.test.mjs"
 Prerequisites: JDK 21, and Docker (for the local database and the integration tests). Maven is not needed;
 the committed Maven Wrapper (`./mvnw`, `mvnw.cmd`) downloads Maven 3.9.11 on first use.
 
-1. Start PostgreSQL 16 (only PostgreSQL — the containerised backend and frontend are behind the Compose profile
-   `app`, see [Run with Docker Compose](#run-with-docker-compose-scrum-7)):
+1. Start PostgreSQL 16 and Keycloak (SCRUM-13 — the backend validates its tokens; the containerised backend and
+   frontend are behind the Compose profile `app`, see [Run with Docker Compose](#run-with-docker-compose-scrum-7)):
 
    ```bash
    docker compose up -d
@@ -203,7 +379,8 @@ the committed Maven Wrapper (`./mvnw`, `mvnw.cmd`) downloads Maven 3.9.11 on fir
    java -jar target/todo-backend-0.0.0-SNAPSHOT.jar   # placeholder version for local builds (SCRUM-8)
    ```
 
-3. Check it is up: `curl http://localhost:8080/actuator/health` returns `{"status":"UP"}`.
+3. Check it is up: `curl http://localhost:8080/actuator/health` returns `{"status":"UP"}`. API calls need a bearer
+   token ([Call the API with curl](#call-the-api-with-curl)).
 
 4. Run all tests and the coverage gate (needs Docker for Testcontainers):
 
@@ -225,15 +402,23 @@ Stop the database with `docker compose down` (add `-v` to delete its data volume
 | `DB_PASSWORD` | `todo` | Database password (matches `docker-compose.yml`; not a real secret) |
 | `SERVER_PORT` | `8080` | HTTP port |
 | `APP_CORS_ALLOWED_ORIGINS` | `http://localhost:5173` | Comma-separated list of origins allowed to call `/api/**` (CORS) |
+| `APP_AUTH_ISSUER_URI` | `http://localhost:8180/realms/todo` | SCRUM-13: expected `iss` of access tokens (public Keycloak URL) |
+| `APP_AUTH_JWK_SET_URI` | `http://localhost:8180/realms/todo/protocol/openid-connect/certs` | SCRUM-13: where the signing keys are fetched (Compose: `http://keycloak:8080/…`) |
+| `APP_AUTH_AUDIENCE` | `todo-api` | SCRUM-13: required `aud` value |
+| `APP_AUTH_CLOCK_SKEW` | `30s` | SCRUM-13: tolerance for `exp`/`nbf` (0–60 s) |
 
 Example: `DB_URL=jdbc:postgresql://db:5432/todo DB_PASSWORD=... APP_CORS_ALLOWED_ORIGINS=http://localhost:3000 java -jar target/todo-backend-0.0.0-SNAPSHOT.jar`
 
 ## API
 
-All endpoints consume and produce `application/json`.
+All endpoints consume and produce `application/json`. Since SCRUM-13 every `/api/**` call needs
+`Authorization: Bearer <access token>` of the Keycloak realm `todo`; the Task endpoints also need the role `todo-user`
+(401 / 403 otherwise — see [Authentication](#authentication-scrum-13)). The `curl` examples below assume
+`-H "Authorization: Bearer $TOKEN"`.
 
 | Method | Path | Description | Success |
 |---|---|---|---|
+| `GET` | `/api/me` | The authenticated user: `subject`, `username`, `email`, `name`, `roles` (SCRUM-13; token required, role not) | `200` |
 | `POST` | `/api/tasks` | Create a task (`title` required, `description`, `status`, `dueDate` optional; `status` defaults to `TODO`) | `201` + `Location` |
 | `GET` | `/api/tasks?page=0&size=20&status=DONE` | List tasks, newest first (`page` ≥ 0, `size` 1–100, larger sizes are clamped to 100); optional `status` filter (SCRUM-6, see below) | `200` |
 | `GET` | `/api/tasks/{id}` | Get one task | `200` |
@@ -281,7 +466,7 @@ curl -i -X PATCH http://localhost:8080/api/tasks/1/status \
 curl 'http://localhost:8080/api/tasks?status=DONE&page=0&size=20'
 ```
 
-Every error (400, 404, 405, 415, 500) uses one body:
+Every error (400, 401, 403, 404, 405, 415, 500) uses one body:
 
 ```json
 {
@@ -366,7 +551,7 @@ node --test ".github/scripts/api/test/*.test.mjs"         # breaking-change gate
 | Backend unit + slice | JUnit 5, Mockito, MockMvc (`@WebMvcTest`) | service rules, controller contract, error mapping, CORS config | `./mvnw verify` | `target/surefire-reports/`, `target/site/jacoco/` / `todo-backend-<key>-<sha>-reports` |
 | Backend integration | `@SpringBootTest(RANDOM_PORT)` + Testcontainers PostgreSQL 16 | CRUD, paging, status, Flyway, restart persistence; real-HTTP error contract, CORS and actuator exposure (SCRUM-7-AC-13..15) | `./mvnw verify` (needs Docker) | same |
 | Frontend unit + component | Vitest, Testing Library, MSW | API client, pages, components (no backend) | `cd frontend && npm test` (`npm run test:coverage` for the gate) | `frontend/reports/` / `todo-frontend-<key>-<sha>-reports` |
-| End-to-end (Compose) | Playwright (Chromium) | browser → nginx → backend → PostgreSQL: list, create, edit + deep-link reload, status change, filter, backend validation error, build identity; HTTP smoke of the stack (SCRUM-7-AC-18, AC-19) | see below | `e2e/reports/compose/` / `todo-e2e-<key>-<sha>-reports` |
+| End-to-end (Compose) | Playwright (Chromium) | browser → nginx → backend → PostgreSQL: list, create, edit + deep-link reload, status change, filter, backend validation error, build identity; HTTP smoke of the stack (SCRUM-7-AC-18, AC-19); SCRUM-13: brokered login via Corp SSO (project `setup`, reused session), deep-link redirect, renewal, expired-token recovery, logout, no-access user (project `auth`), 401/CSP/issuer checks | see below | `e2e/reports/compose/` / `todo-e2e-<key>-<sha>-reports` |
 | End-to-end (dev mode) | Playwright | Vite dev server on 5173 → backend on 8080 cross-origin (SCRUM-7-AC-21, SCRUM-1-AC-14) | see below | `e2e/reports/dev/` / same artifact |
 
 End-to-end tests ([`e2e/`](e2e), ADR [0012](docs/adr/0012-end-to-end-testing-playwright.md)) have their own
@@ -381,6 +566,12 @@ npm test                                              # compose mode → reports
 npm run test:dev                                      # dev mode: starts Vite on 5173 (or reuses yours) → reports/dev/
 npx playwright show-report reports/compose/html
 ```
+
+Since SCRUM-13 the suites authenticate: project `setup` logs alice in once through Corp SSO and saves the Keycloak
+session cookies to `e2e/.auth/` (git-ignored; never uploaded); API set-up uses `todo-e2e` client-credentials tokens.
+Keycloak must be reachable at `E2E_AUTH_URL` (default `http://localhost:8180`); the expiry tests wait for the backend's
+clock skew (`E2E_AUTH_CLOCK_SKEW_SECONDS`, default 30 — CI runs the backend with 5 s). Playwright traces of failed
+tests may contain dev-only tokens (5-minute lifetime).
 
 The tests create their own uniquely named tasks, so they pass against a database that already has data; only the
 empty-state test needs a fresh volume (`down -v`) and is skipped otherwise (CI enforces it with
@@ -455,6 +646,8 @@ ADR 0011).
 | Variable | Where | Default | Purpose |
 |---|---|---|---|
 | `VITE_API_BASE_URL` | `frontend/.env.local`, shell or CI env | `http://localhost:8080` | Origin of the backend (no trailing slash, no `/api` suffix); `/` = same-origin (`<page origin>/api/…`, used by the container image behind nginx — SCRUM-7-AC-17) |
+| `VITE_AUTH_URL`, `VITE_AUTH_REALM`, `VITE_AUTH_CLIENT_ID` | `frontend/.env.local` or shell | `http://localhost:8180`, `todo`, `todo-frontend` | SCRUM-13: Keycloak for the login (dev mode) |
+| `VITE_AUTH_CONFIG_URL` | image build (`Dockerfile`) | — | SCRUM-13: load the Keycloak settings at run time from this URL instead (image: `/auth-config.json`) |
 | `JIRA_KEY` | CI (`identity` job) or shell | `UNKNOWN` | Jira key embedded in the build identity (ADR 0008) |
 | `GITHUB_SHA`, `GITHUB_REF_NAME`, `GITHUB_HEAD_REF` | set by GitHub Actions | `git` CLI fallback | Commit/branch embedded in the build identity |
 

@@ -4,6 +4,26 @@
  */
 
 export interface paths {
+    "/api/me": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get the authenticated user
+         * @description Claims of the access token: subject, preferred_username, e-mail, name and the application roles. Needs a valid access token, but not the todo-user role.
+         */
+        get: operations["getCurrentUser"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/tasks": {
         parameters: {
             query?: never;
@@ -88,6 +108,17 @@ export interface components {
             field: string;
             message: string;
         };
+        /** @description The authenticated user (claims of the access token, SCRUM-13) */
+        MeResponse: {
+            email: string | null;
+            name: string | null;
+            /** @description Application roles of the user (todo-user, todo-admin), sorted */
+            roles: string[];
+            /** @description Subject (sub) of the access token */
+            subject: string;
+            /** @description preferred_username */
+            username: string;
+        };
         PageResponseTaskResponse: {
             items: components["schemas"]["TaskResponse"][];
             /** Format: int32 */
@@ -140,6 +171,46 @@ export interface components {
 }
 export type $defs = Record<string, never>;
 export interface operations {
+    getCurrentUser: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The authenticated user */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["MeResponse"];
+                };
+            };
+            /** @description Missing, invalid or expired access token */
+            401: {
+                headers: {
+                    /** @description Bearer challenge (RFC 6750) */
+                    "WWW-Authenticate": string;
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiError"];
+                };
+            };
+            /** @description Unexpected error */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiError"];
+                };
+            };
+        };
+    };
     listTasks: {
         parameters: {
             query?: {
@@ -168,6 +239,28 @@ export interface operations {
             /** @description Invalid page, size or status */
             400: {
                 headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiError"];
+                };
+            };
+            /** @description Missing, invalid or expired access token */
+            401: {
+                headers: {
+                    /** @description Bearer challenge (RFC 6750) */
+                    "WWW-Authenticate": string;
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiError"];
+                };
+            };
+            /** @description The access token lacks the application role todo-user */
+            403: {
+                headers: {
+                    /** @description Bearer challenge with error="insufficient_scope" (RFC 6750) */
+                    "WWW-Authenticate": string;
                     [name: string]: unknown;
                 };
                 content: {
@@ -212,6 +305,28 @@ export interface operations {
             /** @description Validation failed, malformed JSON or invalid field value */
             400: {
                 headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiError"];
+                };
+            };
+            /** @description Missing, invalid or expired access token */
+            401: {
+                headers: {
+                    /** @description Bearer challenge (RFC 6750) */
+                    "WWW-Authenticate": string;
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiError"];
+                };
+            };
+            /** @description The access token lacks the application role todo-user */
+            403: {
+                headers: {
+                    /** @description Bearer challenge with error="insufficient_scope" (RFC 6750) */
+                    "WWW-Authenticate": string;
                     [name: string]: unknown;
                 };
                 content: {
@@ -267,6 +382,28 @@ export interface operations {
                     "application/json": components["schemas"]["ApiError"];
                 };
             };
+            /** @description Missing, invalid or expired access token */
+            401: {
+                headers: {
+                    /** @description Bearer challenge (RFC 6750) */
+                    "WWW-Authenticate": string;
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiError"];
+                };
+            };
+            /** @description The access token lacks the application role todo-user */
+            403: {
+                headers: {
+                    /** @description Bearer challenge with error="insufficient_scope" (RFC 6750) */
+                    "WWW-Authenticate": string;
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiError"];
+                };
+            };
             /** @description Task not found */
             404: {
                 headers: {
@@ -314,6 +451,28 @@ export interface operations {
             /** @description Validation failed, malformed JSON, invalid field value or non-numeric id */
             400: {
                 headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiError"];
+                };
+            };
+            /** @description Missing, invalid or expired access token */
+            401: {
+                headers: {
+                    /** @description Bearer challenge (RFC 6750) */
+                    "WWW-Authenticate": string;
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiError"];
+                };
+            };
+            /** @description The access token lacks the application role todo-user */
+            403: {
+                headers: {
+                    /** @description Bearer challenge with error="insufficient_scope" (RFC 6750) */
+                    "WWW-Authenticate": string;
                     [name: string]: unknown;
                 };
                 content: {
@@ -376,6 +535,28 @@ export interface operations {
                     "application/json": components["schemas"]["ApiError"];
                 };
             };
+            /** @description Missing, invalid or expired access token */
+            401: {
+                headers: {
+                    /** @description Bearer challenge (RFC 6750) */
+                    "WWW-Authenticate": string;
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiError"];
+                };
+            };
+            /** @description The access token lacks the application role todo-user */
+            403: {
+                headers: {
+                    /** @description Bearer challenge with error="insufficient_scope" (RFC 6750) */
+                    "WWW-Authenticate": string;
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiError"];
+                };
+            };
             /** @description Task not found */
             404: {
                 headers: {
@@ -423,6 +604,28 @@ export interface operations {
             /** @description Missing, null or invalid status, malformed JSON or non-numeric id */
             400: {
                 headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiError"];
+                };
+            };
+            /** @description Missing, invalid or expired access token */
+            401: {
+                headers: {
+                    /** @description Bearer challenge (RFC 6750) */
+                    "WWW-Authenticate": string;
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiError"];
+                };
+            };
+            /** @description The access token lacks the application role todo-user */
+            403: {
+                headers: {
+                    /** @description Bearer challenge with error="insufficient_scope" (RFC 6750) */
+                    "WWW-Authenticate": string;
                     [name: string]: unknown;
                 };
                 content: {

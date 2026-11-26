@@ -1,0 +1,130 @@
+{
+  "realm": "todo",
+  "displayName": "To-Do (LOCAL DEVELOPMENT ONLY)",
+  "enabled": true,
+  "sslRequired": "external",
+  "registrationAllowed": false,
+  "loginWithEmailAllowed": false,
+  "bruteForceProtected": true,
+  "accessTokenLifespan": "${TODO_KC_ACCESS_TOKEN_LIFESPAN:300}",
+  "ssoSessionIdleTimeout": 1800,
+  "ssoSessionMaxLifespan": 36000,
+  "revokeRefreshToken": true,
+  "refreshTokenMaxReuse": 0,
+  "roles": {
+    "realm": [
+      { "name": "todo-user", "description": "May use the To-Do API (SCRUM-13)" },
+      { "name": "todo-admin", "description": "Reserved for future admin operations (SCRUM-13)" }
+    ]
+  },
+  "clients": [
+    {
+      "clientId": "todo-frontend",
+      "name": "To-Do SPA",
+      "publicClient": true,
+      "standardFlowEnabled": true,
+      "implicitFlowEnabled": false,
+      "directAccessGrantsEnabled": false,
+      "serviceAccountsEnabled": false,
+      "frontchannelLogout": false,
+      "fullScopeAllowed": false,
+      "redirectUris": ["${TODO_APP_URL:http://localhost:3000}/oidc/callback", "${TODO_DEV_URL:http://localhost:5173}/oidc/callback"],
+      "webOrigins": ["${TODO_APP_URL:http://localhost:3000}", "${TODO_DEV_URL:http://localhost:5173}"],
+      "attributes": {
+        "pkce.code.challenge.method": "S256",
+        "post.logout.redirect.uris": "${TODO_APP_URL:http://localhost:3000}/signed-out##${TODO_DEV_URL:http://localhost:5173}/signed-out"
+      },
+      "protocolMappers": [
+        {
+          "name": "audience todo-api",
+          "protocol": "openid-connect",
+          "protocolMapper": "oidc-audience-mapper",
+          "config": { "included.custom.audience": "todo-api", "access.token.claim": "true", "id.token.claim": "false", "introspection.token.claim": "true" }
+        }
+      ]
+    },
+    {
+      "clientId": "todo-e2e",
+      "name": "E2E / scripts service account (LOCAL DEVELOPMENT ONLY)",
+      "publicClient": false,
+      "secret": "dev-only-todo-e2e-secret",
+      "standardFlowEnabled": false,
+      "directAccessGrantsEnabled": false,
+      "serviceAccountsEnabled": true,
+      "fullScopeAllowed": false,
+      "protocolMappers": [
+        {
+          "name": "audience todo-api",
+          "protocol": "openid-connect",
+          "protocolMapper": "oidc-audience-mapper",
+          "config": { "included.custom.audience": "todo-api", "access.token.claim": "true", "id.token.claim": "false" }
+        }
+      ]
+    },
+    {
+      "clientId": "todo-e2e-short",
+      "name": "E2E expiry tests: 5-second access tokens (LOCAL DEVELOPMENT ONLY)",
+      "publicClient": false,
+      "secret": "dev-only-todo-e2e-short-secret",
+      "standardFlowEnabled": false,
+      "directAccessGrantsEnabled": false,
+      "serviceAccountsEnabled": true,
+      "fullScopeAllowed": false,
+      "attributes": { "access.token.lifespan": "5" },
+      "protocolMappers": [
+        {
+          "name": "audience todo-api",
+          "protocol": "openid-connect",
+          "protocolMapper": "oidc-audience-mapper",
+          "config": { "included.custom.audience": "todo-api", "access.token.claim": "true", "id.token.claim": "false" }
+        }
+      ]
+    }
+  ],
+  "scopeMappings": [
+    { "client": "todo-frontend", "roles": ["todo-user", "todo-admin"] },
+    { "client": "todo-e2e", "roles": ["todo-user"] },
+    { "client": "todo-e2e-short", "roles": ["todo-user"] }
+  ],
+  "users": [
+    { "username": "service-account-todo-e2e", "enabled": true, "serviceAccountClientId": "todo-e2e", "realmRoles": ["todo-user", "default-roles-todo"] },
+    { "username": "service-account-todo-e2e-short", "enabled": true, "serviceAccountClientId": "todo-e2e-short", "realmRoles": ["todo-user", "default-roles-todo"] }
+  ],
+  "identityProviders": [
+    {
+      "alias": "corp-sso",
+      "displayName": "Corp SSO",
+      "providerId": "oidc",
+      "enabled": true,
+      "trustEmail": true,
+      "storeToken": false,
+      "firstBrokerLoginFlowAlias": "first broker login",
+      "config": {
+        "issuer": "${TODO_KC_PUBLIC_URL:http://localhost:8180}/realms/mock-idp",
+        "authorizationUrl": "${TODO_KC_PUBLIC_URL:http://localhost:8180}/realms/mock-idp/protocol/openid-connect/auth",
+        "logoutUrl": "${TODO_KC_PUBLIC_URL:http://localhost:8180}/realms/mock-idp/protocol/openid-connect/logout",
+        "tokenUrl": "${TODO_KC_INTERNAL_URL:http://localhost:8080}/realms/mock-idp/protocol/openid-connect/token",
+        "jwksUrl": "${TODO_KC_INTERNAL_URL:http://localhost:8080}/realms/mock-idp/protocol/openid-connect/certs",
+        "userInfoUrl": "${TODO_KC_INTERNAL_URL:http://localhost:8080}/realms/mock-idp/protocol/openid-connect/userinfo",
+        "clientId": "todo-broker",
+        "clientSecret": "dev-only-todo-broker-secret",
+        "clientAuthMethod": "client_secret_post",
+        "defaultScope": "openid profile email",
+        "validateSignature": "true",
+        "useJwksUrl": "true",
+        "pkceEnabled": "true",
+        "pkceMethod": "S256",
+        "syncMode": "FORCE",
+        "sendIdTokenOnLogout": "true",
+        "sendClientIdOnLogout": "false",
+        "backchannelSupported": "false",
+        "disableUserInfo": "true"
+      }
+    }
+  ],
+  "identityProviderMappers": [
+    { "name": "username from preferred_username", "identityProviderAlias": "corp-sso", "identityProviderMapper": "oidc-username-idp-mapper", "config": { "syncMode": "FORCE", "template": "${CLAIM.preferred_username}" } },
+    { "name": "group todo-users -> role todo-user", "identityProviderAlias": "corp-sso", "identityProviderMapper": "oidc-role-idp-mapper", "config": { "syncMode": "FORCE", "claim": "groups", "claim.value": "todo-users", "role": "todo-user" } },
+    { "name": "group todo-admins -> role todo-admin", "identityProviderAlias": "corp-sso", "identityProviderMapper": "oidc-role-idp-mapper", "config": { "syncMode": "FORCE", "claim": "groups", "claim.value": "todo-admins", "role": "todo-admin" } }
+  ]
+}

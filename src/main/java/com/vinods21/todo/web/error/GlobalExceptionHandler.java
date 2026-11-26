@@ -13,6 +13,8 @@ import org.springframework.http.HttpStatus;
 import org.springframework.http.HttpStatusCode;
 import org.springframework.http.ResponseEntity;
 import org.springframework.http.converter.HttpMessageNotReadableException;
+import org.springframework.security.access.AccessDeniedException;
+import org.springframework.security.core.AuthenticationException;
 import org.springframework.validation.FieldError;
 import org.springframework.validation.method.ParameterValidationResult;
 import org.springframework.web.HttpMediaTypeNotSupportedException;
@@ -69,6 +71,15 @@ public class GlobalExceptionHandler extends ResponseEntityExceptionHandler {
         ApiError body = ApiError.of(HttpStatus.BAD_REQUEST, "Invalid value for parameter '" + ex.getParameterName() + "'",
                 request.getRequestURI(), List.of());
         return ResponseEntity.badRequest().body(body);
+    }
+
+    /**
+     * SCRUM-13 (design §5.4): security exceptions raised inside MVC (e.g. a future {@code @PreAuthorize}) are not
+     * errors of this handler: rethrown, so the security filter chain answers 401/403 instead of the catch-all 500.
+     */
+    @ExceptionHandler({AuthenticationException.class, AccessDeniedException.class})
+    public void rethrowSecurityException(RuntimeException ex) {
+        throw ex;
     }
 
     /** SCRUM-2-AC-14: generic 500, details logged server-side only. */

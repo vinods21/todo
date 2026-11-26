@@ -1,7 +1,9 @@
+import { currentRoute, tokenSource } from '../auth/token'
 import { API_BASE_URL } from './config'
-import { ApiError, GENERIC_ERROR_MESSAGE, NETWORK_ERROR_MESSAGE, toApiError } from './errors'
+import { ApiError, GENERIC_ERROR_MESSAGE, NETWORK_ERROR_MESSAGE, SESSION_EXPIRED_MESSAGE, toApiError } from './errors'
 
-// The only module that calls fetch (ADR 0006).
+// The only module that calls fetch for the API (ADR 0006). SCRUM-13 (ADR 0018 §2): it attaches the access token and
+// owns the 401 renewal + retry.
 
 // Upper-case on purpose: fetch only normalises GET/POST/PUT/DELETE/HEAD/OPTIONS, a lower-case 'patch' is sent verbatim.
 export type HttpMethod = 'GET' | 'POST' | 'PUT' | 'PATCH'
@@ -35,21 +37,54 @@ export function buildUrl(path: string, query?: Query, baseUrl: string = API_BASE
   return url
 }
 
-export async function request<T>(method: HttpMethod, path: string, opts: RequestOptions = {}): Promise<T> {
+/** SCRUM-13-AC-11: the token is attached only to URLs on the API origin (same origin when API_BASE_URL is ''). */
+export function isApiUrl(url: URL, baseUrl: string = API_BASE_URL): boolean {
+  return url.origin === new URL(baseUrl || '/', window.location.origin).origin
+}
+
+async function accessToken(): Promise<string | undefined> {
+  try {
+    return await tokenSource().getAccessToken()
+  } catch {
+    return undefined
+  }
+}
+
+async function send(url: URL, method: HttpMethod, opts: RequestOptions, token: string | undefined): Promise<Response> {
   const headers: Record<string, string> = { Accept: 'application/json' }
+  // SCRUM-13-AC-11: the bearer token goes in a header (never a URL) and only to the API origin.
+  if (token !== undefined) headers.Authorization = `Bearer ${token}`
   const init: RequestInit = { method, headers, signal: opts.signal }
   if (opts.body !== undefined) {
     headers['Content-Type'] = 'application/json'
     init.body = JSON.stringify(opts.body)
   }
-
-  let response: Response
   try {
-    response = await fetch(buildUrl(path, opts.query), init)
+    return await fetch(url, init)
   } catch (error) {
     if (isAbortError(error)) throw error
     // SCRUM-1-AC-10: backend down, DNS or CORS failure all surface as a TypeError.
     throw new ApiError('network', 0, NETWORK_ERROR_MESSAGE)
+  }
+}
+
+export async function request<T>(method: HttpMethod, path: string, opts: RequestOptions = {}): Promise<T> {
+  const url = buildUrl(path, opts.query)
+  const toApi = isApiUrl(url)
+  let response = await send(url, method, opts, toApi ? await accessToken() : undefined)
+
+  if (toApi && response.status === 401) {
+    // SCRUM-13-AC-14: renew once and retry the identical request once; otherwise start the login (back to this route).
+    const renewed = await tokenSource().renew()
+    if (renewed !== undefined) response = await send(url, method, opts, renewed)
+    if (response.status === 401) {
+      tokenSource().signIn(currentRoute())
+      throw new ApiError('unauthorized', 401, SESSION_EXPIRED_MESSAGE)
+    }
+  }
+  if (toApi && response.status === 403) {
+    // SCRUM-13-AC-14: "You do not have access" page, not a generic error and not a login loop.
+    tokenSource().forbidden()
   }
 
   if (!response.ok) {

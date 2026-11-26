@@ -94,7 +94,7 @@ class OpenApiContractTest {
     @DisplayName("SCRUM-12-AC-13: an undocumented status is rejected")
     void undocumentedStatusRejected() {
         assertThat(getTask(418, VALID_TASK)).singleElement().asString()
-                .isEqualTo("GET /api/tasks/{id} (getTask) 418: undocumented status 418 (documented: 200, 400, 404, 500)");
+                .isEqualTo("GET /api/tasks/{id} (getTask) 418: undocumented status 418 (documented: 200, 400, 401, 403, 404, 500)");
     }
 
     @Test

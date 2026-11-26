@@ -1,6 +1,7 @@
 package com.vinods21.todo;
 
 import com.jayway.jsonpath.JsonPath;
+import com.vinods21.todo.support.AuthTestConfiguration;
 import com.vinods21.todo.support.PostgresTestcontainersConfiguration;
 import com.vinods21.todo.support.RealHttp;
 import org.junit.jupiter.api.BeforeEach;
@@ -27,7 +28,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 @Tag("SCRUM-7")
 @DisplayName("SCRUM-7 actuator exposure over real HTTP")
 @SpringBootTest(webEnvironment = SpringBootTest.WebEnvironment.RANDOM_PORT)
-@Import(PostgresTestcontainersConfiguration.class)
+@Import({PostgresTestcontainersConfiguration.class, AuthTestConfiguration.class}) // SCRUM-13: in-test JWT issuer
 class ActuatorExposureIntegrationTest {
 
     @LocalServerPort

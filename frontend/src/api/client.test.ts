@@ -1,8 +1,17 @@
 import { http, HttpResponse } from 'msw'
 import { API, errorBody, makeTask } from '../test/fixtures'
 import { server } from '../test/server'
-import { buildUrl, isAbortError, request } from './client'
-import { ApiError, GENERIC_ERROR_MESSAGE, isApiError, isApiErrorBody, NETWORK_ERROR_MESSAGE } from './errors'
+import { installFakeTokenSource } from '../test/auth'
+import { buildUrl, isAbortError, isApiUrl, request } from './client'
+import {
+  ApiError,
+  FORBIDDEN_MESSAGE,
+  GENERIC_ERROR_MESSAGE,
+  isApiError,
+  isApiErrorBody,
+  NETWORK_ERROR_MESSAGE,
+  SESSION_EXPIRED_MESSAGE,
+} from './errors'
 import type { Task } from './types'
 
 async function failure(promise: Promise<unknown>): Promise<ApiError> {
@@ -195,5 +204,107 @@ describe('SCRUM-7 same-origin API base', () => {
     )
     await expect(client.request('GET', '/api/tasks', { query: { page: 0 } })).resolves.toEqual({ ok: true })
     expect(seen).toBe('http://localhost:3000/api/tasks?page=0')
+  })
+})
+
+describe('SCRUM-13 API client authentication', () => {
+  function recordAuthorization(status = 200) {
+    const seen: (string | null)[] = []
+    server.use(
+      http.get(`${API}/things`, ({ request: req }) => {
+        seen.push(req.headers.get('authorization'))
+        return status === 200
+          ? HttpResponse.json({ ok: true })
+          : HttpResponse.json(errorBody(status, 'x', [], '/api/things'), {
+              status,
+              headers: { 'WWW-Authenticate': 'Bearer error="invalid_token"' },
+            })
+      }),
+    )
+    return seen
+  }
+
+  it('SCRUM-13-AC-11: every API request carries Authorization: Bearer <access token>, never in the URL', async () => {
+    const seen = recordAuthorization()
+    await request('GET', '/api/things', { query: { a: 1 } })
+    expect(seen).toEqual(['Bearer test-access-token'])
+  })
+
+  it('SCRUM-13-AC-11: the token is attached only to the API origin', () => {
+    expect(isApiUrl(new URL('http://localhost:8080/api/tasks'))).toBe(true)
+    expect(isApiUrl(new URL('http://evil.test/api/tasks'))).toBe(false)
+    expect(isApiUrl(new URL('http://localhost:8180/realms/todo'))).toBe(false)
+    // same-origin mode (container image, VITE_API_BASE_URL=/): the page origin
+    expect(isApiUrl(new URL(`${window.location.origin}/api/tasks`), '')).toBe(true)
+    expect(isApiUrl(new URL('http://localhost:8080/api/tasks'), '')).toBe(window.location.origin === 'http://localhost:8080')
+  })
+
+  it('SCRUM-13-AC-11: without a token (signed out) no Authorization header is sent', async () => {
+    installFakeTokenSource({ token: undefined })
+    const seen = recordAuthorization()
+    await request('GET', '/api/things')
+    expect(seen).toEqual([null])
+  })
+
+  it('SCRUM-13-AC-14: a 401 renews the token once and retries the identical request once with the new token', async () => {
+    const source = installFakeTokenSource({ renewTo: 'renewed-token' })
+    const seen: (string | null)[] = []
+    const bodies: unknown[] = []
+    server.use(
+      http.post(`${API}/things`, async ({ request: req }) => {
+        seen.push(req.headers.get('authorization'))
+        bodies.push(await req.json())
+        return seen.length === 1
+          ? HttpResponse.json(errorBody(401, 'Invalid or expired access token', [], '/api/things'), { status: 401 })
+          : HttpResponse.json(makeTask({ id: 3 }), { status: 201 })
+      }),
+    )
+
+    const task = await request<Task>('POST', '/api/things', { body: { title: 'kept' } })
+
+    expect(task.id).toBe(3)
+    expect(seen).toEqual(['Bearer test-access-token', 'Bearer renewed-token'])
+    expect(bodies).toEqual([{ title: 'kept' }, { title: 'kept' }])
+    expect(source.renew).toHaveBeenCalledTimes(1)
+    expect(source.signIn).not.toHaveBeenCalled()
+  })
+
+  it('SCRUM-13-AC-14: 401 again after the renewal → login to the current route and an unauthorized ApiError', async () => {
+    const source = installFakeTokenSource({ renewTo: 'renewed-token' })
+    const seen = recordAuthorization(401)
+    window.history.replaceState({}, '', '/tasks/5/edit?x=1')
+
+    const error = await failure(request('GET', '/api/things'))
+
+    expect(seen).toEqual(['Bearer test-access-token', 'Bearer renewed-token'])
+    expect(error.kind).toBe('unauthorized')
+    expect(error.status).toBe(401)
+    expect(error.message).toBe(SESSION_EXPIRED_MESSAGE)
+    expect(source.signIn).toHaveBeenCalledWith('/tasks/5/edit?x=1')
+    window.history.replaceState({}, '', '/')
+  })
+
+  it('SCRUM-13-AC-14: a failed renewal → no retry, login started', async () => {
+    const source = installFakeTokenSource({ renewTo: undefined })
+    const seen = recordAuthorization(401)
+
+    const error = await failure(request('GET', '/api/things'))
+
+    expect(seen).toHaveLength(1)
+    expect(error.kind).toBe('unauthorized')
+    expect(source.signIn).toHaveBeenCalledTimes(1)
+  })
+
+  it('SCRUM-13-AC-14: 403 → a forbidden ApiError and the session is told (no renewal, no login loop)', async () => {
+    const source = installFakeTokenSource()
+    recordAuthorization(403)
+
+    const error = await failure(request('GET', '/api/things'))
+
+    expect(error.kind).toBe('forbidden')
+    expect(error.message).toBe(FORBIDDEN_MESSAGE)
+    expect(source.forbidden).toHaveBeenCalledTimes(1)
+    expect(source.renew).not.toHaveBeenCalled()
+    expect(source.signIn).not.toHaveBeenCalled()
   })
 })

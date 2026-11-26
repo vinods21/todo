@@ -16,6 +16,8 @@ export function isTaskStatus(value: string): value is TaskStatus {
 export type Task = Schemas['TaskResponse']
 export type FieldErrorItem = Schemas['FieldErrorItem']
 export type ApiErrorBody = Schemas['ApiError']
+/** SCRUM-13-AC-21: body of `GET /api/me`. */
+export type CurrentUser = Schemas['MeResponse']
 
 export interface Page<T> {
   items: T[]

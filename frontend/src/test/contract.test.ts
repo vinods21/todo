@@ -3,7 +3,7 @@
 // (502 HTML, network errors) are intentionally not validated: they model the infrastructure, not the backend.
 import { TASK_STATUSES } from '../api/types'
 import { contractViolations, fetchViolations, findOperation, schemaViolations, spec } from './contract'
-import { API, errorBody, makePage, makeTask } from './fixtures'
+import { API, errorBody, makeCurrentUser, makePage, makeTask } from './fixtures'
 import { handlers, seedTasks } from './handlers'
 
 const ORIGIN = new URL(API).origin
@@ -71,6 +71,8 @@ describe('SCRUM-12 MSW handlers and fixtures vs api/openapi.yaml', () => {
     { name: 'updateTaskStatus 200', method: 'PATCH', path: '/tasks/1/status', body: { status: 'IN_PROGRESS' }, status: 200 },
     { name: 'updateTaskStatus 404', method: 'PATCH', path: '/tasks/999/status', body: { status: 'DONE' }, status: 404 },
     { name: 'updateTaskStatus 400 invalid', method: 'PATCH', path: '/tasks/1/status', body: { status: 'done' }, status: 400 },
+    // SCRUM-13-AC-24: the authenticated user, and 401 without a token (backend fidelity of the default handlers)
+    { name: 'getCurrentUser 200', method: 'GET', path: '/me', status: 200 },
   ]
 
   test.each(scenarios)('SCRUM-12-AC-07: default handler response conforms — $name', async ({ method, path, body, status }) => {
@@ -81,6 +83,38 @@ describe('SCRUM-12 MSW handlers and fixtures vs api/openapi.yaml', () => {
     const result = await fetchViolations(method, `${API}${path}`, body)
     expect(result.status).toBe(status)
     expect(result.violations).toEqual([])
+  })
+
+  const anonymous: { name: string; method: string; path: string; body?: unknown }[] = [
+    { name: 'getCurrentUser', method: 'GET', path: '/me' },
+    { name: 'listTasks', method: 'GET', path: '/tasks?page=0&size=20' },
+    { name: 'getTask', method: 'GET', path: '/tasks/1' },
+    { name: 'createTask', method: 'POST', path: '/tasks', body: { title: 'x', description: null, status: 'TODO', dueDate: null } },
+    { name: 'updateTask', method: 'PUT', path: '/tasks/1', body: { title: 'x', description: null, status: 'DONE', dueDate: null } },
+    { name: 'updateTaskStatus', method: 'PATCH', path: '/tasks/1/status', body: { status: 'DONE' } },
+  ]
+
+  test.each(anonymous)('SCRUM-13-AC-24: default handler 401 without a token conforms — $name', async ({ method, path, body }) => {
+    seedTasks([{ title: 'Seeded' }])
+    const result = await fetchViolations(method, `${API}${path}`, body, null)
+    expect(result.status).toBe(401)
+    expect(result.violations).toEqual([])
+  })
+
+  test('SCRUM-13-AC-24: 403 and 401 bodies need the WWW-Authenticate header; MeResponse fixtures conform', () => {
+    const forbidden = JSON.stringify(errorBody(403, 'Access denied'))
+    expect(
+      contractViolations('GET', `${API}/tasks`, 403, jsonHeaders({ 'WWW-Authenticate': 'Bearer error="insufficient_scope"' }), forbidden),
+    ).toEqual([])
+    expect(contractViolations('GET', `${API}/tasks`, 403, jsonHeaders(), forbidden).join('\n')).toContain(
+      'missing required header WWW-Authenticate',
+    )
+    expect(contractViolations('GET', `${API}/me`, 403, jsonHeaders(), forbidden).join('\n')).toContain(
+      'undocumented status 403',
+    )
+    expect(schemaViolations('MeResponse', makeCurrentUser())).toEqual([])
+    expect(schemaViolations('MeResponse', makeCurrentUser({ email: null, name: null, roles: [] }))).toEqual([])
+    expect(schemaViolations('ApiError', errorBody(401, 'Authentication required'))).toEqual([])
   })
 
   test('SCRUM-12-AC-07: fixture builders conform', () => {
@@ -138,7 +172,7 @@ describe('SCRUM-12 MSW handlers and fixtures vs api/openapi.yaml', () => {
       status: 418,
       headers: jsonHeaders(),
       body: VALID_TASK,
-      expected: 'GET /api/tasks/{id} (getTask) 418: undocumented status 418 (documented: 200, 400, 404, 500)',
+      expected: 'GET /api/tasks/{id} (getTask) 418: undocumented status 418 (documented: 200, 400, 401, 403, 404, 500)',
     },
     {
       name: 'an unknown operation',

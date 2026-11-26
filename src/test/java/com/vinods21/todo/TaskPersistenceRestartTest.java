@@ -1,6 +1,7 @@
 package com.vinods21.todo;
 
 import com.jayway.jsonpath.JsonPath;
+import com.vinods21.todo.support.TestJwtIssuer;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Tag;
 import org.junit.jupiter.api.Test;
@@ -39,13 +40,19 @@ class TaskPersistenceRestartTest {
                         "DB_URL=" + postgres.getJdbcUrl(),
                         "DB_USERNAME=" + postgres.getUsername(),
                         "DB_PASSWORD=" + postgres.getPassword(),
-                        "SERVER_PORT=0")
+                        "SERVER_PORT=0",
+                        // SCRUM-13: the in-test JWT issuer (support/TestJwtIssuer) instead of Keycloak
+                        "APP_AUTH_ISSUER_URI=" + TestJwtIssuer.ISSUER,
+                        "APP_AUTH_JWK_SET_URI=" + TestJwtIssuer.jwkSetUri())
                 .run();
     }
 
     private static RestClient clientFor(ConfigurableApplicationContext context) {
         String port = context.getEnvironment().getProperty("local.server.port");
-        return RestClient.create("http://localhost:" + port);
+        return RestClient.builder()
+                .baseUrl("http://localhost:" + port)
+                .defaultHeader(HttpHeaders.AUTHORIZATION, "Bearer " + TestJwtIssuer.userToken()) // SCRUM-13
+                .build();
     }
 
     private static Integer appliedMigrations(ConfigurableApplicationContext context) {

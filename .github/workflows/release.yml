@@ -648,6 +648,9 @@ jobs:
       FRONTEND_DIGEST: ${{ needs.images.outputs.frontend_digest }}
       COMPOSE_PROFILES: app
       COMPOSE_PROJECT_NAME: todo-release-e2e
+      # SCRUM-13 (design §11.3): short backend clock skew for the token-expiry tests (as CI e2e).
+      TODO_AUTH_CLOCK_SKEW: 5s
+      E2E_AUTH_CLOCK_SKEW_SECONDS: "5"
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -672,8 +675,12 @@ jobs:
           .github/scripts/release/e2e-images.sh load images
           { echo "TODO_BACKEND_IMAGE=${IMAGE_BACKEND}"; echo "TODO_FRONTEND_IMAGE=${IMAGE_FRONTEND}"; echo "TODO_IMAGE_TAG=${VERSION}"; } >> "$GITHUB_ENV"
 
-      - name: Pull PostgreSQL (the only image Compose may fetch; not a release artefact)
-        run: docker compose pull postgres
+      # SCRUM-13-AC-34 (ADR 0018 §6): PostgreSQL and the digest-pinned Keycloak are the only images Compose may fetch —
+      # third-party dev/CI services, not release artefacts (never built, scanned or published here).
+      - name: Pull PostgreSQL and Keycloak (the only images Compose may fetch; not release artefacts)
+        run: |
+          docker compose pull postgres keycloak
+          docker image inspect -f '{{ index .RepoDigests 0 }}' "$(docker compose config --format json | jq -r '.services.keycloak.image')"
 
       - name: Start the candidate stack and wait for health (SCRUM-9-AC-03, AC-05)
         id: stack
@@ -707,13 +714,14 @@ jobs:
           E2E_JIRA_KEY: ${{ env.JIRA_KEY }}
           E2E_GIT_SHA: ${{ env.SHA }}
           E2E_VERSION: ${{ env.VERSION }}
-        run: npx playwright test # all compose projects (empty-state, http, ui); retries: 1 on CI (config)
+        run: npx playwright test # all compose projects (setup, empty-state, http, ui, auth); retries: 1 on CI (config)
 
-      - name: Critical To-Do workflows passed; flaky tests reported (SCRUM-9-AC-07, AC-09)
+      # SCRUM-13-AC-34: 12 → 19 @critical (brokered login, deep link, renewal, expiry recovery, logout, no-access, 401).
+      - name: Critical To-Do workflows passed; flaky tests reported (SCRUM-9-AC-07, AC-09; SCRUM-13-AC-34)
         if: ${{ !cancelled() && steps.stack.outcome == 'success' }}
         run: >
           node .github/scripts/release/e2e-gate.mjs --results e2e/reports/compose/results.json
-          --tag critical --min 12 --summary "$GITHUB_STEP_SUMMARY"
+          --tag critical --min 19 --summary "$GITHUB_STEP_SUMMARY"
 
       - name: Lifecycle and persistence of the candidate images (SCRUM-9-AC-08; SCRUM-7-AC-03, AC-10)
         id: lifecycle
@@ -748,7 +756,7 @@ jobs:
             echo "### Pre-release e2e — artifact and cleanup (SCRUM-9-AC-12, AC-14)"
             echo
             echo "Mode **${MODE}**, version \`${VERSION}\`, commit \`${SHA}\` · artifact \`${ARTIFACT}\` (30 days)"
-            echo "· IDs exercised: SCRUM-9-AC-03 AC-04 AC-05 AC-06 AC-07 AC-08 AC-09 AC-12 AC-13 AC-14"
+            echo "· IDs exercised: SCRUM-9-AC-03 AC-04 AC-05 AC-06 AC-07 AC-08 AC-09 AC-12 AC-13 AC-14; SCRUM-13-AC-30 AC-34"
           } >> "$GITHUB_STEP_SUMMARY"
 
   # ══════════════════════════════════════════════════════════════════════════════════════════════════════════════

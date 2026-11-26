@@ -12,7 +12,9 @@ RUN npm ci --no-audit --no-fund
 COPY index.html tsconfig.json tsconfig.app.json tsconfig.node.json vite.config.ts ./
 COPY src/ src/
 # A-02 / AC-17: same-origin API base — nothing environment-specific is inlined.
-ENV VITE_API_BASE_URL=/
+# SCRUM-13-AC-16: the Keycloak settings are read at run time from /auth-config.json (nginx, AUTH_* env below).
+ENV VITE_API_BASE_URL=/ \
+    VITE_AUTH_CONFIG_URL=/auth-config.json
 ARG JIRA_KEY=UNKNOWN
 ARG GIT_COMMIT=UNKNOWN
 ARG GIT_BRANCH=UNKNOWN
@@ -46,10 +48,16 @@ RUN apk add --no-cache 'libcrypto3>=3.5.9-r1' 'libssl3>=3.5.9-r1' 'zlib>=1.4-r0'
 COPY nginx/security-headers.conf nginx/proxy.conf /etc/nginx/snippets/
 # Rendered by the entrypoint to /etc/nginx/conf.d/default.conf (replaces the base image's default server).
 COPY nginx/default.conf.template /etc/nginx/templates/default.conf.template
+# SCRUM-13-AC-16: validates AUTH_* before the template is rendered (entrypoint runs *.sh in name order).
+COPY --chmod=0755 nginx/16-todo-auth-config.sh /docker-entrypoint.d/16-todo-auth-config.sh
 COPY --from=dist /dist/ /usr/share/nginx/html/
+# SCRUM-13 (ADR 0018 §3): public Keycloak settings only (the SPA client is public — no secret in the image, NFR-01).
 ENV BACKEND_URL=http://backend:8080 \
+    AUTH_URL=http://localhost:8180 \
+    AUTH_REALM=todo \
+    AUTH_CLIENT_ID=todo-frontend \
     NGINX_ENTRYPOINT_LOCAL_RESOLVERS=1 \
-    NGINX_ENVSUBST_FILTER="^(BACKEND_URL|NGINX_LOCAL_RESOLVERS)$"
+    NGINX_ENVSUBST_FILTER="^(BACKEND_URL|NGINX_LOCAL_RESOLVERS|AUTH_URL|AUTH_REALM|AUTH_CLIENT_ID)$"
 USER 101:101
 EXPOSE 8080
 # NFR-07: checks nginx itself, not the backend. JSON form (hadolint DL3025); busybox wget exits 1 on failure.

@@ -1,5 +1,7 @@
 import '@testing-library/jest-dom/vitest'
 import { cleanup } from '@testing-library/react'
+import { resetForbidden } from '../auth/session'
+import { installFakeTokenSource } from './auth'
 import { resetStore } from './handlers'
 import { server } from './server'
 
@@ -13,6 +15,12 @@ beforeAll(() => {
   server.events.on('request:unhandled', ({ request }) => {
     unhandled.push(`${request.method} ${request.url}`)
   })
+})
+
+// SCRUM-13-AC-17: every test starts authenticated (fake token source, token test-access-token).
+beforeEach(() => {
+  installFakeTokenSource()
+  resetForbidden()
 })
 
 afterEach(() => {

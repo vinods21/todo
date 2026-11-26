@@ -91,7 +91,7 @@ What each job does:
 | `sbom` | Trivy image SBOMs from the OCI archives; finalizes all four SBOMs; CycloneDX schema validation; minimum component counts | both |
 | `scan` | Trivy DB update (fails closed), 6 scan targets, live gate self-test, **vulnerability gate** | both |
 | `code-scanning` | SARIF → Security tab (not for fork PRs; reporting only) | both |
-| `e2e-release` | **pre-release e2e gate** (SCRUM-9, ADR 0015): loads the two OCI archives into the runner's Docker (digest-checked; no rebuild, no pull, no login), asserts that the running containers are exactly those images (digest chain, image store recorded), Compose stack, full Playwright compose suite + `@critical` guard (≥ 12, all passed), image + lifecycle checks; report artifact; always `down -v` | both |
+| `e2e-release` | **pre-release e2e gate** (SCRUM-9, ADR 0015): loads the two OCI archives into the runner's Docker (digest-checked; no rebuild, no pull, no login), asserts that the running containers are exactly those images (digest chain, image store recorded), Compose stack, full Playwright compose suite + `@critical` guard (≥ 19 since SCRUM-13, all passed; Keycloak + PostgreSQL are the only images pulled), image + lifecycle checks; report artifact; always `down -v` | both |
 | `release-gate` | **single aggregation point**: every gate incl. `e2e-release` must be `success`; assembles the release-candidate bundle (`SHA256SUMS`, notes) | both |
 | `publish` | pre-existence (authoritative) → push immutable tags → attestations → annotated tag → draft release → publish → move `X.Y`/`latest` | **release only** |
 | `verify` | post-publish verification from the outside (AC-28) | **release only** |
@@ -134,13 +134,16 @@ pushes**, not a rebuild:
    output (the digest scanned, SBOM'd and pushed), then `docker load`s it and tags it `ghcr.io/vinods21/todo-<svc>:<version>`
    (`.github/scripts/release/e2e-images.sh load`).
 2. Starts `docker-compose.yml` with `TODO_BACKEND_IMAGE`/`TODO_FRONTEND_IMAGE`/`TODO_IMAGE_TAG=<version>` via
-   `up -d --no-build --pull never --wait --wait-timeout 240` (only `postgres:16-alpine` is pulled, in its own step).
+   `up -d --no-build --pull never --wait --wait-timeout 240` (only `postgres:16-alpine` and the digest-pinned
+   `quay.io/keycloak/keycloak` — SCRUM-13, third-party dev/CI services, not release artefacts — are pulled, in their own
+   step; backend tokens use a 5 s clock skew there, as in CI).
 3. Asserts the digest chain (`e2e-images.sh assert-running`, after `up` and again after the lifecycle restarts):
    running container `.Image` = local image ID = archive **config** digest (classic image store) or **manifest**
    digest (containerd image store); archive manifest digest = published digest. The store is detected and recorded;
    any other store fails the job (never guessed).
-4. Runs `verify-images.sh`, the **full** compose Playwright suite (`empty-state`, `http`, `ui`) with the candidate's
-   identity on a fresh volume, the `@critical` guard (`e2e-gate.mjs --tag critical --min 12`: ≥ 12 executed, all
+4. Runs `verify-images.sh`, the **full** compose Playwright suite (`setup`, `empty-state`, `http`, `ui`, `auth` —
+   authenticated through Keycloak since SCRUM-13) with the candidate's identity on a fresh volume, the `@critical`
+   guard (`e2e-gate.mjs --tag critical --min 19` since SCRUM-13, was 12: ≥ 19 executed, all
    passed, skipped counts as failure; passed-on-retry tests are named and raise a warning), `verify-lifecycle.sh`.
 5. Always: summary, diagnostics on failure, Compose logs, `docker compose down -v --remove-orphans`, artifact
    `todo-release-e2e-<KEY>-<sha>-reports`.
@@ -161,11 +164,11 @@ export VERSION=<stamped version> BACKEND_DIGEST=<sha256:…> FRONTEND_DIGEST=<sh
 .github/scripts/release/e2e-images.sh load images
 export TODO_BACKEND_IMAGE=$IMAGE_BACKEND TODO_FRONTEND_IMAGE=$IMAGE_FRONTEND TODO_IMAGE_TAG=$VERSION
 export COMPOSE_PROFILES=app COMPOSE_PROJECT_NAME=todo-release-e2e
-docker compose pull postgres && docker compose up -d --no-build --pull never --wait
+docker compose pull postgres keycloak && docker compose up -d --no-build --pull never --wait   # SCRUM-13: + Keycloak
 .github/scripts/release/e2e-images.sh assert-running
 (cd e2e && npm ci && npx playwright install --with-deps --only-shell chromium \
   && E2E_EXPECT_EMPTY_DB=1 E2E_JIRA_KEY=$KEY E2E_GIT_SHA=$SHA E2E_VERSION=$VERSION npx playwright test)
-node .github/scripts/release/e2e-gate.mjs --results e2e/reports/compose/results.json --tag critical --min 12
+node .github/scripts/release/e2e-gate.mjs --results e2e/reports/compose/results.json --tag critical --min 19
 docker compose down -v --remove-orphans
 ```
 

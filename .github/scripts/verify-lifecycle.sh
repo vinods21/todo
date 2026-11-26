@@ -1,15 +1,25 @@
 #!/usr/bin/env bash
 # SCRUM-7-AC-03, AC-10 (design §9.3): clean SIGTERM shutdown of the backend, data kept across backend restart and
-# down/up without re-applying migrations, data removed by down -v. Uses curl and docker compose (COMPOSE_* env).
+# down/up without re-applying migrations, data removed by down -v. Uses curl, jq and docker compose (COMPOSE_* env).
+# SCRUM-13-AC-33: every API call authenticates with a client-credentials token of the service account todo-e2e
+# (LOCAL DEVELOPMENT ONLY secret, keycloak/realms/todo-realm.json); a fresh token after each `up` (a new Keycloak
+# container re-imports the realm, so earlier tokens' keys are gone).
 set -euo pipefail
 
 FE="http://localhost:${TODO_FRONTEND_PORT:-3000}"
+KC="http://localhost:${TODO_KEYCLOAK_PORT:-8180}"
 summary="${GITHUB_STEP_SUMMARY:-/dev/stdout}"
 reports="e2e/reports"
 mkdir -p "$reports"
 
+token() {
+  curl -sf -d grant_type=client_credentials -d client_id="${E2E_CLIENT_ID:-todo-e2e}" \
+    -d client_secret="${E2E_CLIENT_SECRET:-dev-only-todo-e2e-secret}" \
+    "$KC/realms/todo/protocol/openid-connect/token" | jq -r .access_token
+}
+
 status_of() {
-  curl -s -o /dev/null -w '%{http_code}' "$1"
+  curl -s -o /dev/null -w '%{http_code}' -H "Authorization: Bearer $(token)" "$1"
 }
 
 flyway_count() {
@@ -27,7 +37,11 @@ echo "### Lifecycle and persistence (SCRUM-7-AC-03, AC-10)" >> "$summary"
 echo >> "$summary"
 
 # 1. Marker task through the proxy.
-id=$(curl -sf -X POST "$FE/api/tasks" -H 'Content-Type: application/json' \
+# SCRUM-13-AC-26b / AC-33: anonymous requests are refused (401), authenticated ones work.
+anonymous=$(curl -s -o /dev/null -w '%{http_code}' "$FE/api/tasks")
+echo "- SCRUM-13: anonymous \`GET /api/tasks\` → **$anonymous** (expected 401); API calls below use a todo-e2e token" >> "$summary"
+[ "$anonymous" = "401" ] || fail "anonymous GET /api/tasks returned $anonymous (expected 401)"
+id=$(curl -sf -X POST "$FE/api/tasks" -H 'Content-Type: application/json' -H "Authorization: Bearer $(token)" \
   -d '{"title":"SCRUM-7 lifecycle marker"}' | sed -E 's/.*"id":([0-9]+).*/\1/')
 [[ "$id" =~ ^[0-9]+$ ]] || fail "could not create the marker task"
 echo "marker task id: $id"

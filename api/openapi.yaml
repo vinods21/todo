@@ -1,15 +1,52 @@
 openapi: 3.1.0
 info:
-  description: "Task REST API of the To-Do application (SCRUM-2, SCRUM-6). Every error response uses the ApiError body (ADR 0003). Contract: ADR 0017."
+  description: "Task REST API of the To-Do application (SCRUM-2, SCRUM-6). All operations require a bearer access token of the Keycloak realm 'todo' (SCRUM-13, ADR 0018); the Task operations also require the role todo-user. Every error response uses the ApiError body (ADR 0003). Contract: ADR 0017."
   title: To-Do Task API
   version: "1"
 servers:
 - description: "Same origin: nginx proxies /api/** to the backend (ADR 0011)"
   url: /
 tags:
+- description: The authenticated user (SCRUM-13)
+  name: Current user
 - description: "Create, read, list, update, change the status of and delete tasks"
   name: Tasks
 paths:
+  /api/me:
+    get:
+      description: "Claims of the access token: subject, preferred_username, e-mail, name and the application roles. Needs a valid access token, but not the todo-user role."
+      operationId: getCurrentUser
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/MeResponse"
+          description: The authenticated user
+        "401":
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiError"
+          description: "Missing, invalid or expired access token"
+          headers:
+            WWW-Authenticate:
+              description: Bearer challenge (RFC 6750)
+              required: true
+              schema:
+                type: string
+              style: simple
+        "500":
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiError"
+          description: Unexpected error
+      security:
+      - bearerAuth: []
+      summary: Get the authenticated user
+      tags:
+      - Current user
   /api/tasks:
     get:
       description: "Newest first (createdAt DESC, id DESC). size > 100 is clamped to 100. status filters by exactly one exact, case-sensitive enum name; empty, repeated, comma-separated, unknown or wrong-case values are rejected (ADR 0009)."
@@ -52,12 +89,40 @@ paths:
               schema:
                 $ref: "#/components/schemas/ApiError"
           description: "Invalid page, size or status"
+        "401":
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiError"
+          description: "Missing, invalid or expired access token"
+          headers:
+            WWW-Authenticate:
+              description: Bearer challenge (RFC 6750)
+              required: true
+              schema:
+                type: string
+              style: simple
+        "403":
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiError"
+          description: The access token lacks the application role todo-user
+          headers:
+            WWW-Authenticate:
+              description: Bearer challenge with error="insufficient_scope" (RFC 6750)
+              required: true
+              schema:
+                type: string
+              style: simple
         "500":
           content:
             application/json:
               schema:
                 $ref: "#/components/schemas/ApiError"
           description: Unexpected error
+      security:
+      - bearerAuth: []
       summary: List tasks
       tags:
       - Tasks
@@ -90,6 +155,32 @@ paths:
               schema:
                 $ref: "#/components/schemas/ApiError"
           description: "Validation failed, malformed JSON or invalid field value"
+        "401":
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiError"
+          description: "Missing, invalid or expired access token"
+          headers:
+            WWW-Authenticate:
+              description: Bearer challenge (RFC 6750)
+              required: true
+              schema:
+                type: string
+              style: simple
+        "403":
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiError"
+          description: The access token lacks the application role todo-user
+          headers:
+            WWW-Authenticate:
+              description: Bearer challenge with error="insufficient_scope" (RFC 6750)
+              required: true
+              schema:
+                type: string
+              style: simple
         "415":
           content:
             application/json:
@@ -102,6 +193,8 @@ paths:
               schema:
                 $ref: "#/components/schemas/ApiError"
           description: Unexpected error
+      security:
+      - bearerAuth: []
       summary: Create a task
       tags:
       - Tasks
@@ -124,6 +217,32 @@ paths:
               schema:
                 $ref: "#/components/schemas/ApiError"
           description: Non-numeric id
+        "401":
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiError"
+          description: "Missing, invalid or expired access token"
+          headers:
+            WWW-Authenticate:
+              description: Bearer challenge (RFC 6750)
+              required: true
+              schema:
+                type: string
+              style: simple
+        "403":
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiError"
+          description: The access token lacks the application role todo-user
+          headers:
+            WWW-Authenticate:
+              description: Bearer challenge with error="insufficient_scope" (RFC 6750)
+              required: true
+              schema:
+                type: string
+              style: simple
         "404":
           content:
             application/json:
@@ -136,6 +255,8 @@ paths:
               schema:
                 $ref: "#/components/schemas/ApiError"
           description: Unexpected error
+      security:
+      - bearerAuth: []
       summary: Delete a task
       tags:
       - Tasks
@@ -161,6 +282,32 @@ paths:
               schema:
                 $ref: "#/components/schemas/ApiError"
           description: Non-numeric id
+        "401":
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiError"
+          description: "Missing, invalid or expired access token"
+          headers:
+            WWW-Authenticate:
+              description: Bearer challenge (RFC 6750)
+              required: true
+              schema:
+                type: string
+              style: simple
+        "403":
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiError"
+          description: The access token lacks the application role todo-user
+          headers:
+            WWW-Authenticate:
+              description: Bearer challenge with error="insufficient_scope" (RFC 6750)
+              required: true
+              schema:
+                type: string
+              style: simple
         "404":
           content:
             application/json:
@@ -173,6 +320,8 @@ paths:
               schema:
                 $ref: "#/components/schemas/ApiError"
           description: Unexpected error
+      security:
+      - bearerAuth: []
       summary: Get a task
       tags:
       - Tasks
@@ -205,6 +354,32 @@ paths:
               schema:
                 $ref: "#/components/schemas/ApiError"
           description: "Validation failed, malformed JSON, invalid field value or non-numeric id"
+        "401":
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiError"
+          description: "Missing, invalid or expired access token"
+          headers:
+            WWW-Authenticate:
+              description: Bearer challenge (RFC 6750)
+              required: true
+              schema:
+                type: string
+              style: simple
+        "403":
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiError"
+          description: The access token lacks the application role todo-user
+          headers:
+            WWW-Authenticate:
+              description: Bearer challenge with error="insufficient_scope" (RFC 6750)
+              required: true
+              schema:
+                type: string
+              style: simple
         "404":
           content:
             application/json:
@@ -223,6 +398,8 @@ paths:
               schema:
                 $ref: "#/components/schemas/ApiError"
           description: Unexpected error
+      security:
+      - bearerAuth: []
       summary: Replace a task
       tags:
       - Tasks
@@ -256,6 +433,32 @@ paths:
               schema:
                 $ref: "#/components/schemas/ApiError"
           description: "Missing, null or invalid status, malformed JSON or non-numeric id"
+        "401":
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiError"
+          description: "Missing, invalid or expired access token"
+          headers:
+            WWW-Authenticate:
+              description: Bearer challenge (RFC 6750)
+              required: true
+              schema:
+                type: string
+              style: simple
+        "403":
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiError"
+          description: The access token lacks the application role todo-user
+          headers:
+            WWW-Authenticate:
+              description: Bearer challenge with error="insufficient_scope" (RFC 6750)
+              required: true
+              schema:
+                type: string
+              style: simple
         "404":
           content:
             application/json:
@@ -274,6 +477,8 @@ paths:
               schema:
                 $ref: "#/components/schemas/ApiError"
           description: Unexpected error
+      security:
+      - bearerAuth: []
       summary: Change the status of a task
       tags:
       - Tasks
@@ -317,6 +522,35 @@ components:
       required:
       - field
       - message
+      type: object
+    MeResponse:
+      description: "The authenticated user (claims of the access token, SCRUM-13)"
+      properties:
+        email:
+          type:
+          - string
+          - "null"
+        name:
+          type:
+          - string
+          - "null"
+        roles:
+          description: "Application roles of the user (todo-user, todo-admin), sorted"
+          items:
+            type: string
+          type: array
+        subject:
+          description: Subject (sub) of the access token
+          type: string
+        username:
+          description: preferred_username
+          type: string
+      required:
+      - email
+      - name
+      - roles
+      - subject
+      - username
       type: object
     PageResponseTaskResponse:
       properties:
@@ -434,3 +668,9 @@ components:
       - status
       - title
       type: object
+  securitySchemes:
+    bearerAuth:
+      bearerFormat: JWT
+      description: Access token of the Keycloak realm 'todo' (aud todo-api) — ADR 0018
+      scheme: bearer
+      type: http

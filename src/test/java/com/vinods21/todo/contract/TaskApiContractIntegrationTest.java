@@ -4,6 +4,7 @@ import com.vinods21.todo.support.OpenApiContract;
 import com.vinods21.todo.support.OpenApiDocuments;
 import com.vinods21.todo.support.OpenApiIntegrationTest;
 import com.vinods21.todo.support.RealHttp;
+import com.vinods21.todo.support.TestJwtIssuer;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Tag;
@@ -11,6 +12,7 @@ import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.MethodSource;
 import org.springframework.boot.test.web.server.LocalServerPort;
+import org.springframework.http.HttpHeaders;
 import org.springframework.http.HttpMethod;
 import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
@@ -29,9 +31,13 @@ import static org.assertj.core.api.Assertions.assertThat;
  * via Testcontainers); every response is validated against the <b>committed</b> {@code api/openapi.yaml}. Error
  * inputs mirror {@code ErrorContractIntegrationTest} / {@code TaskStatusIntegrationTest}. {@code {id}} in a URI is a
  * task created for the scenario.
+ * <p>
+ * SCRUM-13-AC-24: scenarios authenticate with tokens of the in-test issuer ({@link TestJwtIssuer}); the 401/403 and
+ * {@code getCurrentUser} scenarios cover every new documented (operation, status) pair.
  */
 @OpenApiIntegrationTest
 @Tag("SCRUM-12")
+@Tag("SCRUM-13")
 @DisplayName("SCRUM-12 Task API contract conformance over real HTTP")
 class TaskApiContractIntegrationTest {
 
@@ -43,13 +49,31 @@ class TaskApiContractIntegrationTest {
     private static final String FULL_BODY =
             "{\"title\":\"SCRUM-12 updated\",\"description\":\"d\",\"status\":\"IN_PROGRESS\",\"dueDate\":null}";
 
+    /** SCRUM-13-AC-24: how a scenario authenticates (TestJwtIssuer tokens). */
+    enum Auth {
+        /** alice with role todo-user (the default). */
+        USER,
+        /** no Authorization header. */
+        NONE,
+        /** a valid token without any application role. */
+        NO_ROLE
+    }
+
     record Scenario(String name, String operationId, int status, HttpMethod method, String uriTemplate,
-            String contentType, String body) {
+            String contentType, String body, Auth auth) {
+
+        Scenario(String name, String operationId, int status, HttpMethod method, String uriTemplate,
+                String contentType, String body) {
+            this(name, operationId, status, method, uriTemplate, contentType, body, Auth.USER);
+        }
+
         @Override
         public String toString() {
             return name;
         }
     }
+
+    private static final String CREATE_BODY = "{\"title\":\"SCRUM-13 contract\"}";
 
     static final List<Scenario> SCENARIOS = List.of(
             // createTask: 201, 400, 415
@@ -100,7 +124,37 @@ class TaskApiContractIntegrationTest {
             new Scenario("deleteTask 204", "deleteTask", 204, HttpMethod.DELETE, "/api/tasks/{id}", null, null),
             new Scenario("deleteTask 400 non-numeric id", "deleteTask", 400, HttpMethod.DELETE, "/api/tasks/abc", null,
                     null),
-            new Scenario("deleteTask 404 unknown id", "deleteTask", 404, HttpMethod.DELETE, UNKNOWN, null, null));
+            new Scenario("deleteTask 404 unknown id", "deleteTask", 404, HttpMethod.DELETE, UNKNOWN, null, null),
+            // SCRUM-13-AC-24: 401 without a token and 403 without the role on every Task operation; getCurrentUser
+            new Scenario("createTask 401 without token", "createTask", 401, HttpMethod.POST, "/api/tasks", JSON,
+                    CREATE_BODY, Auth.NONE),
+            new Scenario("createTask 403 without role", "createTask", 403, HttpMethod.POST, "/api/tasks", JSON,
+                    CREATE_BODY, Auth.NO_ROLE),
+            new Scenario("getTask 401 without token", "getTask", 401, HttpMethod.GET, "/api/tasks/{id}", null, null,
+                    Auth.NONE),
+            new Scenario("getTask 403 without role", "getTask", 403, HttpMethod.GET, "/api/tasks/{id}", null, null,
+                    Auth.NO_ROLE),
+            new Scenario("listTasks 401 without token", "listTasks", 401, HttpMethod.GET, "/api/tasks", null, null,
+                    Auth.NONE),
+            new Scenario("listTasks 403 without role", "listTasks", 403, HttpMethod.GET, "/api/tasks", null, null,
+                    Auth.NO_ROLE),
+            new Scenario("updateTask 401 without token", "updateTask", 401, HttpMethod.PUT, "/api/tasks/{id}", JSON,
+                    FULL_BODY, Auth.NONE),
+            new Scenario("updateTask 403 without role", "updateTask", 403, HttpMethod.PUT, "/api/tasks/{id}", JSON,
+                    FULL_BODY, Auth.NO_ROLE),
+            new Scenario("updateTaskStatus 401 without token", "updateTaskStatus", 401, HttpMethod.PATCH,
+                    "/api/tasks/{id}/status", JSON, "{\"status\":\"DONE\"}", Auth.NONE),
+            new Scenario("updateTaskStatus 403 without role", "updateTaskStatus", 403, HttpMethod.PATCH,
+                    "/api/tasks/{id}/status", JSON, "{\"status\":\"DONE\"}", Auth.NO_ROLE),
+            new Scenario("deleteTask 401 without token", "deleteTask", 401, HttpMethod.DELETE, "/api/tasks/{id}", null,
+                    null, Auth.NONE),
+            new Scenario("deleteTask 403 without role", "deleteTask", 403, HttpMethod.DELETE, "/api/tasks/{id}", null,
+                    null, Auth.NO_ROLE),
+            new Scenario("getCurrentUser 200", "getCurrentUser", 200, HttpMethod.GET, "/api/me", null, null),
+            new Scenario("getCurrentUser 200 without role", "getCurrentUser", 200, HttpMethod.GET, "/api/me", null,
+                    null, Auth.NO_ROLE),
+            new Scenario("getCurrentUser 401 without token", "getCurrentUser", 401, HttpMethod.GET, "/api/me", null,
+                    null, Auth.NONE));
 
     @LocalServerPort
     private int port;
@@ -118,13 +172,17 @@ class TaskApiContractIntegrationTest {
 
     @ParameterizedTest(name = "SCRUM-12-AC-03: {0}")
     @MethodSource("scenarios")
-    @DisplayName("SCRUM-12-AC-03: responses of the running application conform to api/openapi.yaml")
+    @DisplayName("SCRUM-12-AC-03, SCRUM-13-AC-24: responses of the running application conform to api/openapi.yaml")
     void responseConformsToContract(Scenario scenario) {
         long id = http.createTask("SCRUM-12 contract " + scenario.name());
         String uri = scenario.uriTemplate().replace("{id}", Long.toString(id));
 
-        ResponseEntity<String> response = http.exchange(scenario.method(), uri, scenario.contentType(), scenario.body(),
-                Map.of());
+        RealHttp client = scenario.auth() == Auth.NONE ? RealHttp.anonymous(port) : http;
+        Map<String, String> headers = scenario.auth() == Auth.NO_ROLE
+                ? Map.of(HttpHeaders.AUTHORIZATION, "Bearer " + TestJwtIssuer.noRoleToken())
+                : Map.of();
+        ResponseEntity<String> response = client.exchange(scenario.method(), uri, scenario.contentType(),
+                scenario.body(), headers);
 
         assertThat(response.getStatusCode().value()).as("status of %s: %s", scenario, response.getBody())
                 .isEqualTo(scenario.status());
@@ -134,7 +192,7 @@ class TaskApiContractIntegrationTest {
     }
 
     @Test
-    @DisplayName("SCRUM-12-AC-04: every documented (operation, status) is exercised by a scenario; 500 exempt (A-03)")
+    @DisplayName("SCRUM-12-AC-04, SCRUM-13-AC-24: every documented (operation, status) is exercised by a scenario; 500 exempt (A-03)")
     void everyDocumentedResponseIsExercised() {
         // A-03: 500 cannot be provoked over real HTTP; its ApiError body stays covered by TaskControllerTest (SCRUM-2-AC-14).
         Set<String> documented = new TreeSet<>(CONTRACT.documentedResponses());

@@ -1,6 +1,8 @@
 package com.vinods21.todo;
 
 import com.jayway.jsonpath.JsonPath;
+import com.vinods21.todo.support.AuthTestConfiguration;
+import com.vinods21.todo.support.TestJwtIssuer;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Tag;
@@ -9,6 +11,7 @@ import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.boot.test.web.server.LocalServerPort;
 import org.springframework.boot.testcontainers.service.connection.ServiceConnection;
+import org.springframework.context.annotation.Import;
 import org.springframework.http.HttpHeaders;
 import org.springframework.http.HttpMethod;
 import org.springframework.http.MediaType;
@@ -31,6 +34,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 @DisplayName("SCRUM-2 application integration (PostgreSQL 16 via Testcontainers)")
 @SpringBootTest(webEnvironment = SpringBootTest.WebEnvironment.RANDOM_PORT)
 @Testcontainers
+@Import(AuthTestConfiguration.class) // SCRUM-13: in-test JWT issuer; requests authenticate as alice (todo-user)
 class TodoApplicationIntegrationTest {
 
     @Container
@@ -47,7 +51,10 @@ class TodoApplicationIntegrationTest {
 
     @BeforeEach
     void setUp() {
-        client = RestClient.create("http://localhost:" + port);
+        client = RestClient.builder()
+                .baseUrl("http://localhost:" + port)
+                .defaultHeader(HttpHeaders.AUTHORIZATION, "Bearer " + TestJwtIssuer.userToken()) // SCRUM-13
+                .build();
         jdbcTemplate.update("DELETE FROM tasks");
     }
 
